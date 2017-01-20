@@ -1,6 +1,8 @@
 extern crate json;
-use std::sync::Arc;
+extern crate chrono;
 
+use std::sync::Arc;
+use self::chrono::offset::utc::UTC;
 pub enum MessageBody{
     PlainText{text:String},
     File{bytes:Arc<Vec<u8>>},
@@ -30,13 +32,39 @@ impl Message
     {
         return self.room_name.clone();
     }
+    pub fn to_send_json_text(&self)->Result<String,()>
+    {
+        let now_time = UTC::now();
+        let now_time = now_time.to_rfc2822();
+        let json_object = match self.messsage_body {
+            MessageBody::PlainText {ref text} =>object!
+            {
+                "type"=>"CHAT_SEND",
+                "sender"=>self.get_user_id(),
+                "text"=>text.clone(),
+                "time"=>now_time,
+                "room"=>self.get_room_name()
+            },
+            _ => {
+                object!
+                {
+                    "sender"=>self.get_user_id(),
+                    "text"=>"",
+                    "time"=>now_time,
+                    "room"=>""
+                }
+            }
+        };
+        let send_message = json::stringify(json_object);
+        return Ok(send_message);
+    }
     pub fn from_str(user_id:String,  json_text: &str)->Result<Message, ()>
     {
         let json_message = match json::parse(json_text)
         {
             Ok(v) => v,
-            Err(_) => {
-            	println!("{} parsing error!",json_text);
+            Err(_) =>
+            {
                 return Err(());
             }
         };
@@ -46,7 +74,6 @@ impl Message
             json::JsonValue::Object(ref object) => object,
             _ =>
             {
-            	println!("line 186 parsing error!");
                 return Err(());
             }
         };
@@ -58,13 +85,11 @@ impl Message
                 &json::JsonValue::Short(value) =>value.as_str().to_string(),
                 _=>
                 {
-                    println!("line 196 parsing error!");
                     return Err(());
                 }
             },
             None => 
             {
-            	println!("line 200 parsing error!");
                 return Err(());
             }
         };
@@ -77,13 +102,11 @@ impl Message
                 &json::JsonValue::Short(value) =>value.as_str().to_string(),
                 _=>
                 {
-                    println!("line 211 parsing error!");
                     return Err(());
                 }
             },
             None =>
             {
-            	println!("line 216 parsing error!");
                 return Err(());
             }
         };
@@ -94,13 +117,11 @@ impl Message
                 &json::JsonValue::String(ref value)=>value.clone(),
                 &json::JsonValue::Short(value) =>value.as_str().to_string(),
                 _=>{
-                    println!("line 237 parsing error!");
                     return Err(());
                 }
             },
             None => 
             {
-            	println!("line 242 parsing error!");
                 return Err(());
             }
         };
@@ -114,7 +135,6 @@ impl Message
 				return Err(());
 			}
             _ => {
-            	println!("line 244 parsing error!");
                 return Err(());
             }
         };

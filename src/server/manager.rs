@@ -51,18 +51,22 @@ fn check_handshake(mut stream: TcpStream)->Result<(User, TcpStream), ()>
     stream.set_nodelay(true);
     stream.set_read_timeout(Some(Duration::new(1, 0)));
     stream.set_write_timeout(Some(Duration::new(1, 0)));
-    while message_block_end == false {
-        if let Ok(read_size) = stream.read(&mut read_bytes) {
-            for i in 0..read_size {
-                if read_bytes[i] == b'\n' && message_block_end == false {
-                    message_block_end = true;
-                } else if message_block_end == false {
-                    string_memory_block.push(read_bytes[i]);
-                } else {
-                    buffer.push(read_bytes[i]);
+    while message_block_end == false
+    {
+        if let Ok(read_size) = stream.read(&mut read_bytes)
+        {
+            for i in 0..read_size 
+            {
+                match (read_bytes[i], message_block_end)
+                {
+                    (b'\n', false)=>message_block_end = true,
+                    ( _ , false)=>string_memory_block.push(read_bytes[i]),
+                    _=>buffer.push(read_bytes[i])
                 }
             }
-        } else {
+        }
+        else 
+        {
             return Err(());
         }
     }
@@ -89,7 +93,9 @@ fn check_handshake(mut stream: TcpStream)->Result<(User, TcpStream), ()>
     let json_value =
     if let json::JsonValue::Object(object) = json_value{
         object
-    }else{
+    }
+    else
+    {
         return Err(());
     };
 
@@ -102,7 +108,9 @@ fn check_handshake(mut stream: TcpStream)->Result<(User, TcpStream), ()>
             &json::JsonValue::Null=>format!("{}",stream.peer_addr().unwrap()),
             _=>return Err(())
         }
-    }else{
+    }
+    else
+    {
         return Err(());
     };
     let hashing = {
@@ -146,12 +154,18 @@ impl InputStream
             buffer: Vec::new(),
         }
     }
+    fn get_user_id(&self)->String
+    {
+        return self.hashcode.clone();
+    }
     fn read_message(&mut self) -> Result<Message, bool> {
         let mut read_bytes = [0u8; 1024];
         let res_code = self.stream.read(&mut read_bytes);
 
-        if let Err(e) = res_code {
-        	let exception = match e.kind(){
+        if let Err(e) = res_code
+        {
+        	let exception = match e.kind()
+            {
         		ErrorKind::ConnectionRefused |
 				ErrorKind::ConnectionReset |
 				ErrorKind::ConnectionAborted |
@@ -165,17 +179,20 @@ impl InputStream
         let read_size: usize = res_code.unwrap();
         let mut message_block_end = false;
         let mut string_memory_block: Vec<u8> = Vec::new();
-        if self.buffer.len() != 0 {
-            for byte in &self.buffer {
+        if self.buffer.len() != 0
+        {
+            for byte in &self.buffer
+            {
                 string_memory_block.push(*byte);
             }
             self.buffer.clear();
         }
-        for i in 0..read_size {
+        for i in 0..read_size
+        {
             match (read_bytes[i], message_block_end)
             {
-                (b'\n',false)=>message_block_end = true,
-                ( _ , false )=>string_memory_block.push(read_bytes[i]),
+                (b'\n', false)=>message_block_end = true,
+                ( _ , false)=>string_memory_block.push(read_bytes[i]),
                 _=>self.buffer.push(read_bytes[i])
             }
         }
@@ -192,7 +209,7 @@ impl InputStream
             } 
         };
         return match Message::from_str(self.hashcode.clone(), &message)
-            {
+        {
             Ok(message) => Ok(message),
             Err(_) => Err(true),
         };
@@ -207,8 +224,8 @@ pub struct Manager
     file_socket_listener:Arc<TcpListener>,
     input_streams:Vec<Arc< InputStream>>,
     output_streams:BTreeMap< String, Arc< Mutex< TcpStream>>>,
-    read_channel_recv:Arc<Mutex<Receiver<Arc<InputStream>>>>,
-    read_channel_send:Sender<Arc<InputStream>>
+    read_channel_recv:Arc<Mutex<Receiver<Weak<InputStream>>>>,
+    read_channel_send:Sender<Weak<InputStream>>
 }
 
 impl Manager
@@ -229,7 +246,7 @@ impl Manager
             Ok(v) => v,
             Err(_) =>return Err(ChatServerErr::FailedInitializeServer)
         };
-        let (sx,rx) = channel::<Arc<InputStream>>();
+        let (sx,rx) = channel::<Weak<InputStream>>();
         let mut rooms:BTreeMap<String,Room> = BTreeMap::new();
         rooms.insert(String::from("lounge"),Room::new(String::from("lounge")));
         return Ok(Manager
@@ -305,12 +322,18 @@ impl Manager
                 println!("{}",e);
                 return;
             }
-            let mut input_stream = input_stream.unwrap();
+            let input_stream = input_stream.unwrap();
             let pool = pool.clone();
             let input_stream_send = input_stream_send.clone();
             let event_sender = event_sender.clone();
             pool.execute(move||
             {
+                let input_stream = input_stream.upgrade();
+                if let None = input_stream
+                {
+                    return;
+                }
+                let mut input_stream = input_stream.unwrap();
                 let message =match Arc::get_mut(&mut input_stream)
                 {
                     Some(ref mut input_stream)=>input_stream.read_message(),
@@ -321,12 +344,16 @@ impl Manager
                 {
                     if is_not_timeout
                     {
+                        //여기에 온 스트림은 타임아웃이 아닌 다른 오류로 여기까지 온 스트림이다. 필요 없으므로 제거한다.
+                        //유저도 제거하도록 메시지를 보낸다.
+                        let e = EventMessage::DisconnectInputSocket{user_hash_code:input_stream.get_user_id()};
+                         event_sender.send(e).unwrap();
                         return;
                     }
-                    input_stream_send.send(input_stream).unwrap();
+                    input_stream_send.send(Arc::downgrade(&input_stream)).unwrap();
                     return;
                 }
-                input_stream_send.send(input_stream).unwrap();
+                input_stream_send.send(Arc::downgrade(&input_stream)).unwrap();
                 let message = message.unwrap();
                 let e = EventMessage::ComeChatMessage{message:message};
                 event_sender.send(e).unwrap();
@@ -350,7 +377,7 @@ impl Manager
         let mut lounge = self.rooms.get_mut("lounge").unwrap();
         lounge.add_new_user(Arc::downgrade(&rc));
         self.input_streams.push(s.clone());
-        self.read_channel_send.send(s);
+        self.read_channel_send.send(Arc::downgrade(&s));
     }
     fn on_come_chat_message(&mut self,pool:ThreadPool, message:Message)
     {
@@ -384,14 +411,60 @@ impl Manager
         //별도의 흐름에서 스레드 큐에 집어 넣는다.
         thread::spawn(move||
         {
+            let msg = Arc::new(message.to_send_json_text().unwrap().into_bytes());
             for stream in output_streams
             {
+                let msg = msg.clone();
                 pool.execute(move||
                 {
-
+                    let  stream = stream.lock();
+                    if let Err(e) = stream
+                    {
+                        println!("{}",e);
+                        return;
+                    }
+                    let mut stream = stream.unwrap();
+                    let lamda = |mut stream:&TcpStream, bytes:Arc<Vec<u8>>|->bool
+                    {
+                        return match stream.write_all(&bytes) {
+                            Ok(_) => match stream.write_all(b"\n"){
+                                Ok(_)=>true,
+                                Err(_)=>false
+                            },
+                            Err(_) => false,
+                        };
+                    };
+                    if lamda(&mut stream,msg.clone()) == false
+                    {
+                        //TODO:Error, remove both user and  tcpstream in the list.
+                    }
                 });
             }
         });
+    }
+    fn on_disconnectinputstream(&mut self, user_hash_id:String)
+    {
+        //연결이 끊긴 유저 정보를 지운다.
+        let len = self.users.len();
+        for i in 0..len
+        {
+            if self.users[i].get_hashcode() == user_hash_id
+            {
+                self.users.swap_remove(i);
+                break;
+            }
+        }
+        self.output_streams.remove(&user_hash_id);
+
+        let len = self.input_streams.len();
+        for i in 0..len
+        {
+            if self.input_streams[i].get_user_id() == user_hash_id
+            {
+                self.input_streams.swap_remove(i);
+                break;
+            }
+        }
     }
     fn event_procedure(&mut self, pool:ThreadPool, receiver:Receiver<EventMessage>)->bool
     {
@@ -414,10 +487,7 @@ impl Manager
                 {
 
                 },
-                EventMessage::DisconnectInputSocket{..}=>
-                {
-
-                }
+                EventMessage::DisconnectInputSocket{user_hash_code}=>self.on_disconnectinputstream(user_hash_code)
             }
         }
         return false;
@@ -428,6 +498,7 @@ impl Manager
         let (sender,receiver) = channel::<EventMessage>();
         self.init_accept_input_stream(sender.clone(),pool.clone());
         self.init_accept_output_stream(sender.clone(),pool.clone());
+        self.read_user_msg(sender.clone(),pool.clone());
         self.event_procedure(pool.clone(),receiver);
     }
 }
