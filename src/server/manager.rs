@@ -2,7 +2,7 @@ extern crate chrono;
 extern crate num_cpus;
 extern crate crypto_hash;
 extern crate json;
-
+extern crate threadpool;
 use server::ChatServerErr;
 use server::user::User;
 use server::room::Room;
@@ -15,8 +15,31 @@ use std::collections::BTreeMap;
 use std::sync::{Arc,Mutex,Weak};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::net::{TcpListener, TcpStream};
-use threadpool::ThreadPool;
+use self::threadpool::ThreadPool;
 use self::chrono::offset::utc::UTC;
+enum SeverNotifyMessageBody
+{
+    EnterMemberInRoom
+    {
+        new_member:Weak<User>,
+        list:Vec<Weak<User>>
+    },
+    ExitMemberFromRoom
+    {
+        exit_member:Weak<User>,
+        list:Vec<Weak<User>>
+    },
+    ChangeNickName
+    {
+        prev_name:String,
+        new_name:String
+    }
+}
+struct SeverNotifyMessage
+{
+    body:SeverNotifyMessageBody,
+    room_name:String 
+}
 
 enum EventMessage
 {
@@ -54,8 +77,11 @@ enum EventMessage
     ExitRoom
     {
         message:Message
+    },
+    DoNotifySystemMessage
+    {
+        message:SeverNotifyMessage
     }
-
 }
 fn check_handshake(mut stream: TcpStream)->Result<(User, InputStream), ()>
 {
@@ -658,7 +684,55 @@ impl Manager
     }
     fn on_exit_room(&mut self,event_sender:Sender<EventMessage>,message:Message)
     {
-
+        let mut user:Option<Weak<User>> = None;
+        let user_hash_code = message.get_user_id();
+        for it in &self.users
+        {
+            if it.get_hashcode() == user_hash_code
+            {
+                user = Some(Arc::downgrade(&it));
+                break;
+            }
+        }
+        if let None = user
+        {
+            return;
+        }
+        let mut user = user.unwrap();
+        let room_name = message.get_room_name();
+        if self.rooms.contains_key(&room_name) == false
+        {
+            return;
+        }
+        let mut room =self.rooms.get_mut(&room_name).unwrap();
+        let users_in_room:Vec<Weak<User>> = room.get_users();
+        let len = users_in_room.len();
+        let mut index:Option<usize> = None;
+        for i in 0..len
+        {
+            if let Some(it) = users_in_room[i].upgrade()
+            {
+                if it.get_hashcode() == user_hash_code
+                {
+                    index = Some(i);
+                    break;
+                }
+            }
+        }
+        if let None = index
+        {
+            return;
+        }
+        let index:usize = index.unwrap();
+        room.remove_user(index);
+        let mut user_rc = user.upgrade().unwrap();
+        let mut user = Arc::get_mut(&mut user_rc).unwrap();
+        user.exit_room(room.get_name());
+        //TODO:나갔다는 시스템 메시지를 보낸다.
+    }
+    fn on_do_notify_system_message(&mut self, sender:Sender<EventMessage>, pool:ThreadPool, message:SeverNotifyMessage)
+    {
+        //TODO:작성해야 함.
     }
     fn event_procedure(&mut self, pool:ThreadPool,sender:Sender<EventMessage>, receiver:Receiver<EventMessage>)->bool
     {
@@ -686,7 +760,9 @@ impl Manager
                 EventMessage::EnterRoom{message}=>
                     self.on_enter_room(sender.clone(),message),
                 EventMessage::ExitRoom{message}=>
-                    self.on_exit_room(sender.clone(),message)
+                    self.on_exit_room(sender.clone(),message),
+                EventMessage::DoNotifySystemMessage{message}=>
+                    self.on_do_notify_system_message(sender.clone(),pool.clone(),message)
             }
         }
         return false;
