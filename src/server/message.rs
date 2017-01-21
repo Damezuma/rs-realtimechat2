@@ -6,10 +6,15 @@ use self::chrono::offset::utc::UTC;
 pub enum MessageBody{
     PlainText{text:String},
     File{bytes:Arc<Vec<u8>>},
-    Image{bytes:Arc<Vec<u8>>}
+    Image{bytes:Arc<Vec<u8>>},
+    EnterRoom,
+    ExitRoom,
+    ExitSever,
+    ChangeName{new_name:String},
+
 }
 pub struct Message{
-    messsage_body:MessageBody,
+    pub body:MessageBody,
     room_name:String,
     user_id:String
 }
@@ -21,7 +26,7 @@ impl Message
         {
             user_id:user_id,
             room_name:room_name,
-            messsage_body:msg_body
+            body:msg_body
         };
     }
     pub fn get_user_id(&self)->String
@@ -36,7 +41,7 @@ impl Message
     {
         let now_time = UTC::now();
         let now_time = now_time.to_rfc2822();
-        let json_object = match self.messsage_body {
+        let json_object = match self.body {
             MessageBody::PlainText {ref text} =>object!
             {
                 "type"=>"CHAT_SEND",

@@ -41,7 +41,21 @@ enum EventMessage
     DisconnectOutputSocket
     {
         user_hash_code:String
+    },
+    ChangeNickname
+    {
+        user_hash_code:String,
+        new_nickname:String
+    },
+    EnterRoom
+    {
+        message:Message
+    },
+    ExitRoom
+    {
+        message:Message
     }
+
 }
 fn check_handshake(mut stream: TcpStream)->Result<(User, InputStream), ()>
 {
@@ -202,7 +216,7 @@ impl InputStream
         {
             return Err(false);
         }
-        let mut message: String = match String::from_utf8(string_memory_block) 
+        let message: String = match String::from_utf8(string_memory_block) 
         {
             Ok(value) => value,
             Err(_) => 
@@ -269,12 +283,12 @@ impl Manager
         let mut input_listener_rc = self.input_socket_listener.clone();
         thread::spawn(move||
         {
-            let mut input_listener = Arc::get_mut(&mut input_listener_rc);
+            let input_listener = Arc::get_mut(&mut input_listener_rc);
             if let None = input_listener
             {
                 return;
             }
-            let mut input_listener = input_listener.unwrap();
+            let input_listener = input_listener.unwrap();
             for stream in input_listener.incoming()
             {
                 if let Err(e) = stream
@@ -357,17 +371,30 @@ impl Manager
                 }
                 input_stream_send.send(Arc::downgrade(&input_stream)).unwrap();
                 let message = message.unwrap();
-                let e = EventMessage::ComeChatMessage{message:message};
-                event_sender.send(e).unwrap();
-
+                use server::message::MessageBody;
+                let e =
+                match message.body
+                {
+                    MessageBody::PlainText{..}=>Some(EventMessage::ComeChatMessage{message:message}),
+                    MessageBody::EnterRoom=>Some(EventMessage::EnterRoom{message:message}),
+                    MessageBody::ExitRoom=>Some(EventMessage::ExitRoom{message:message}),
+                    _=>
+                    {
+                        //TODO:그 외에 다른 메시지의 처리도 필요하다.
+                        None
+                    }
+                };
+                if let Some(e) = e
+                {
+                    event_sender.send(e).unwrap();
+                }
             });
             
         });
     }
     fn check_outputstream_handshake(mut stream:TcpStream)->Result<(String, TcpStream), ()>
     {
-        let mut bytes = [0u8,1024];
-        let mut buffer = Vec::<u8>::new();
+      
         stream.set_read_timeout(Some(Duration::new(60, 0)));
         let mut bytes = [0u8,1024];
         let mut buffer = Vec::<u8>::new();
@@ -568,8 +595,6 @@ impl Manager
     }
     fn on_init_connect_outputstream(&mut self, sender:Sender<EventMessage>, user_hash_code:String, stream:TcpStream)
     {
-        //
-        let len = self.users.len();
         for it in &self.users
         {
             if it.get_hashcode() == user_hash_code
@@ -579,6 +604,61 @@ impl Manager
                 return;
             }
         }
+    }
+    fn on_change_nickname(&mut self,event_sender:Sender<EventMessage>, user_hash_code:String, new_nickname:String)
+    {
+        //TODO:이름을 바꾸는 루틴, 나중에 시스템메시지로 변경했다는 알림을 보낸다.
+    }
+    fn on_enter_room(&mut self,event_sender:Sender<EventMessage>,message:Message)
+    {
+        //
+        let mut user:Option<Weak<User>> = None;
+        let user_hash_code = message.get_user_id();
+        for it in &self.users
+        {
+            if it.get_hashcode() == user_hash_code
+            {
+                user = Some(Arc::downgrade(&it));
+                break;
+            }
+        }
+        if let Some(user) = user
+        {
+            let room_name = message.get_room_name();
+            if self.rooms.contains_key(&room_name) == false
+            {
+                self.rooms.insert(room_name.clone(), Room::new(room_name.clone()));
+            }
+            let mut room =self.rooms.get_mut(&room_name).unwrap();
+            let users_in_room:Vec<Weak<User>> = room.get_users();
+            let len = users_in_room.len();
+            let mut is_already_in = false;
+            for i in 0..len
+            {
+                if let Some(it) = users_in_room[i].upgrade()
+                {
+                    if it.get_hashcode() == user_hash_code
+                    {
+                        is_already_in = true;
+                        break;
+                    }
+                }
+            }
+            if is_already_in != false
+            {
+                return;
+            }
+
+            //TODO:들어왔다는 시스템 메시지를 보낸다.
+            let mut user_rc = user.upgrade().unwrap();
+            room.add_new_user(Arc::downgrade(&user_rc.clone()));
+            let mut user = Arc::get_mut(&mut user_rc).unwrap();
+            user.enter_room(room.get_name());   
+        }
+    }
+    fn on_exit_room(&mut self,event_sender:Sender<EventMessage>,message:Message)
+    {
+
     }
     fn event_procedure(&mut self, pool:ThreadPool,sender:Sender<EventMessage>, receiver:Receiver<EventMessage>)->bool
     {
@@ -591,15 +671,27 @@ impl Manager
             }
             match received_item.unwrap()
             {
-                EventMessage::InitConnectInputPort{user,stream}=>self.on_init_connect_inputstream(user,stream),
-                EventMessage::InitConnectOutputPort{user_hash_code,stream}=>self.on_init_connect_outputstream(sender.clone(),user_hash_code,stream),
-                EventMessage::ComeChatMessage{message}=>self.on_come_chat_message(sender.clone(),pool.clone(),message),
-                EventMessage::DisconnectOutputSocket{user_hash_code}=>self.on_disconnectoutputstream(user_hash_code),
-                EventMessage::DisconnectInputSocket{user_hash_code}=>self.on_disconnectinputstream(user_hash_code)
+                EventMessage::InitConnectInputPort{user,stream}=>
+                    self.on_init_connect_inputstream(user,stream),
+                EventMessage::InitConnectOutputPort{user_hash_code,stream}=>
+                    self.on_init_connect_outputstream(sender.clone(),user_hash_code,stream),
+                EventMessage::ComeChatMessage{message}=>
+                    self.on_come_chat_message(sender.clone(),pool.clone(),message),
+                EventMessage::DisconnectOutputSocket{user_hash_code}=>
+                    self.on_disconnectoutputstream(user_hash_code),
+                EventMessage::DisconnectInputSocket{user_hash_code}=>
+                    self.on_disconnectinputstream(user_hash_code),
+                EventMessage::ChangeNickname{user_hash_code, new_nickname}=>
+                    self.on_change_nickname(sender.clone(),user_hash_code,new_nickname),
+                EventMessage::EnterRoom{message}=>
+                    self.on_enter_room(sender.clone(),message),
+                EventMessage::ExitRoom{message}=>
+                    self.on_exit_room(sender.clone(),message)
             }
         }
         return false;
     }
+   
     pub fn run(&mut self)
     {
         let pool = ThreadPool::new(128);

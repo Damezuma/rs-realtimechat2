@@ -15,6 +15,10 @@ impl Room
             users:Vec::new()
         };
     }
+    pub fn get_name(&self)->String
+    {
+        return self.name.clone();
+    }
     pub fn add_new_user(&mut self, user:Weak<User>)
     {
         self.users.push(user);
