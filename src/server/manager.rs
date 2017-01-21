@@ -23,11 +23,12 @@ enum EventMessage
     InitConnectInputPort
     {
         user:User,
-        stream:TcpStream
+        stream:InputStream
     },
     InitConnectOutputPort
     {
-
+        user_hash_code:String,
+        stream:TcpStream
     },
     ComeChatMessage
     {
@@ -42,7 +43,7 @@ enum EventMessage
         user_hash_code:String
     }
 }
-fn check_handshake(mut stream: TcpStream)->Result<(User, TcpStream), ()>
+fn check_handshake(mut stream: TcpStream)->Result<(User, InputStream), ()>
 {
     let mut read_bytes = [0u8; 1024];
     let mut buffer = Vec::<u8>::new();
@@ -100,7 +101,8 @@ fn check_handshake(mut stream: TcpStream)->Result<(User, TcpStream), ()>
     };
 
     let name = 
-    if let Some(val) = json_value.get("name"){
+    if let Some(val) = json_value.get("name")
+    {
         match val
         {
             &json::JsonValue::String(ref v)=>v.clone(),
@@ -132,7 +134,7 @@ fn check_handshake(mut stream: TcpStream)->Result<(User, TcpStream), ()>
     {
         return Err(());
     }
-
+    let stream = InputStream::new(stream,hashing.clone(),buffer);
     // 핸드셰이크를 완료한 후, 문제가 없으면 유저정보가 들어간 User를 반환한다.
     return Ok((User::new(name,hashing),stream));
     
@@ -145,13 +147,13 @@ struct InputStream
 }
 impl InputStream
 {
-    fn new(stream: TcpStream, hashcode:String) -> InputStream
+    fn new(stream: TcpStream, hashcode:String,buffer:Vec<u8>) -> InputStream
     {
         return InputStream
         {
             hashcode: hashcode,
             stream:stream,
-            buffer: Vec::new(),
+            buffer: buffer,
         }
     }
     fn get_user_id(&self)->String
@@ -278,7 +280,7 @@ impl Manager
                 if let Err(e) = stream
                 {
                     println!("{}",e);
-                    return;
+                    continue;
                 }
                 let stream = stream.unwrap();
                 let sender = sender.clone();
@@ -362,16 +364,84 @@ impl Manager
             
         });
     }
+    fn check_outputstream_handshake(mut stream:TcpStream)->Result<(String, TcpStream), ()>
+    {
+        let mut bytes = [0u8,1024];
+        let mut buffer = Vec::<u8>::new();
+        stream.set_read_timeout(Some(Duration::new(60, 0)));
+        let mut bytes = [0u8,1024];
+        let mut buffer = Vec::<u8>::new();
+        'read_loop:loop
+        {
+            let read_bytes_size = stream.read(&mut bytes);
+            if let Err( e ) = read_bytes_size
+            {
+                println!("{}",e);
+                match e.kind()
+                {
+                    ErrorKind::ConnectionRefused |
+                    ErrorKind::ConnectionReset |
+                    ErrorKind::ConnectionAborted |
+                    ErrorKind::NotConnected |
+                    ErrorKind::Other=>return Err(()),
+                    _=>continue
+                }
+            }
+            let read_bytes_size:usize = read_bytes_size.unwrap();
+            for i in 0..read_bytes_size
+            {
+                if bytes[i] != b'\n'
+                {
+                    buffer.push(bytes[i]);
+                }
+                else
+                {
+                    break'read_loop;
+                }
+            }
+        }
+        let hash = String::from_utf8(buffer);
+        if let Err(e) = hash
+        {
+            println!("{:?}",e);
+            return Err(());
+        }
+        let hash = hash.unwrap();
+        return Ok((hash,stream));
+    }
     fn init_accept_output_stream(&mut self,event_sender:Sender<EventMessage>,pool:ThreadPool)
     {
+        
+        let mut listener = self.output_socket_listener.clone();
+        //TODO:해야한다.
         thread::spawn(move||
         {
-
+            for stream in listener.incoming()
+            {
+                if let Err(e) = stream
+                {
+                    println!("{}",e);
+                    continue;
+                }
+                let mut stream = stream.unwrap();
+                let event_sender = event_sender.clone();
+                pool.execute(move||
+                {
+                    let res = Manager::check_outputstream_handshake(stream);
+                    if let Err( _ ) = res
+                    {
+                        return;
+                    }
+                    let (user_hash_code, stream) = res.unwrap();
+                    let e = EventMessage::InitConnectOutputPort{user_hash_code:user_hash_code,stream:stream};
+                    event_sender.send(e);
+                });
+            }
         });
     }
-    fn on_init_connect_inputstream(&mut self, user:User, stream:TcpStream)
+    fn on_init_connect_inputstream(&mut self, user:User, stream:InputStream)
     {
-        let s = Arc::new(InputStream::new(stream,user.get_hashcode()));
+        let s = Arc::new(stream);
         let rc = Arc::new(user);
         self.users.push(rc.clone());
         let mut lounge = self.rooms.get_mut("lounge").unwrap();
@@ -379,10 +449,10 @@ impl Manager
         self.input_streams.push(s.clone());
         self.read_channel_send.send(Arc::downgrade(&s));
     }
-    fn on_come_chat_message(&mut self,pool:ThreadPool, message:Message)
+    fn on_come_chat_message(&mut self,sender:Sender<EventMessage>, pool:ThreadPool, message:Message)
     {
         //해당 메시지가 보내진 방 안에 있는 유저이 수신하는 소켓를 구한다.
-        let mut output_streams:Vec<Arc<Mutex<TcpStream>>> = Vec::new();
+        let mut output_streams:Vec<(String,Arc<Mutex< TcpStream>>)> = Vec::new();
         let room_name = message.get_room_name();
         match self.rooms.get_mut(&room_name)
         {
@@ -398,7 +468,9 @@ impl Manager
                     {
                         if let Some(v) = self.output_streams.get(&user.get_hashcode())
                         {
-                            output_streams.push(v.clone());
+                            output_streams.push(
+                                (user.get_hashcode(), v.clone())
+                            );
                         }
                     }
                     else
@@ -412,9 +484,20 @@ impl Manager
         thread::spawn(move||
         {
             let msg = Arc::new(message.to_send_json_text().unwrap().into_bytes());
-            for stream in output_streams
+            for (user_hash_id, stream) in output_streams
             {
                 let msg = msg.clone();
+                let sender = sender.clone();
+                let lamda = |mut stream:&TcpStream, bytes:Arc<Vec<u8>>|->bool
+                {
+                    match stream.write_all(&bytes) {
+                        Ok(_) => match stream.write_all(b"\n"){
+                            Ok(_)=>true,
+                            Err(_)=>false
+                        },
+                        Err(_) => false,
+                    }
+                };
                 pool.execute(move||
                 {
                     let  stream = stream.lock();
@@ -424,23 +507,39 @@ impl Manager
                         return;
                     }
                     let mut stream = stream.unwrap();
-                    let lamda = |mut stream:&TcpStream, bytes:Arc<Vec<u8>>|->bool
-                    {
-                        return match stream.write_all(&bytes) {
-                            Ok(_) => match stream.write_all(b"\n"){
-                                Ok(_)=>true,
-                                Err(_)=>false
-                            },
-                            Err(_) => false,
-                        };
-                    };
+                    
                     if lamda(&mut stream,msg.clone()) == false
                     {
-                        //TODO:Error, remove both user and  tcpstream in the list.
+                        let e = EventMessage::DisconnectOutputSocket{user_hash_code:user_hash_id};
+                        sender.send(e).unwrap();
                     }
                 });
             }
         });
+    }
+    fn on_disconnectoutputstream(&mut self, user_hash_id:String)
+    {
+        //연결이 끊긴 유저 정보를 지운다.
+        let len = self.users.len();
+        for i in 0..len
+        {
+            if self.users[i].get_hashcode() == user_hash_id
+            {
+                self.users.swap_remove(i);
+                break;
+            }
+        }
+        self.output_streams.remove(&user_hash_id);
+
+        let len = self.input_streams.len();
+        for i in 0..len
+        {
+            if self.input_streams[i].get_user_id() == user_hash_id
+            {
+                self.input_streams.swap_remove(i);
+                break;
+            }
+        }
     }
     fn on_disconnectinputstream(&mut self, user_hash_id:String)
     {
@@ -465,8 +564,23 @@ impl Manager
                 break;
             }
         }
+        //TODO:그리고 해당 유저가 있던 방의 유저들에게 새로운 유저목록을 준다.
     }
-    fn event_procedure(&mut self, pool:ThreadPool, receiver:Receiver<EventMessage>)->bool
+    fn on_init_connect_outputstream(&mut self, sender:Sender<EventMessage>, user_hash_code:String, stream:TcpStream)
+    {
+        //
+        let len = self.users.len();
+        for it in &self.users
+        {
+            if it.get_hashcode() == user_hash_code
+            {
+                let wrapper = Arc::new(Mutex::new(stream));
+                self.output_streams.insert(user_hash_code,wrapper);
+                return;
+            }
+        }
+    }
+    fn event_procedure(&mut self, pool:ThreadPool,sender:Sender<EventMessage>, receiver:Receiver<EventMessage>)->bool
     {
         loop
         {
@@ -478,15 +592,9 @@ impl Manager
             match received_item.unwrap()
             {
                 EventMessage::InitConnectInputPort{user,stream}=>self.on_init_connect_inputstream(user,stream),
-                EventMessage::InitConnectOutputPort{..}=>
-                {
-                    
-                },
-                EventMessage::ComeChatMessage{message}=>self.on_come_chat_message(pool.clone(),message),
-                EventMessage::DisconnectOutputSocket{..}=>
-                {
-
-                },
+                EventMessage::InitConnectOutputPort{user_hash_code,stream}=>self.on_init_connect_outputstream(sender.clone(),user_hash_code,stream),
+                EventMessage::ComeChatMessage{message}=>self.on_come_chat_message(sender.clone(),pool.clone(),message),
+                EventMessage::DisconnectOutputSocket{user_hash_code}=>self.on_disconnectoutputstream(user_hash_code),
                 EventMessage::DisconnectInputSocket{user_hash_code}=>self.on_disconnectinputstream(user_hash_code)
             }
         }
@@ -499,6 +607,6 @@ impl Manager
         self.init_accept_input_stream(sender.clone(),pool.clone());
         self.init_accept_output_stream(sender.clone(),pool.clone());
         self.read_user_msg(sender.clone(),pool.clone());
-        self.event_procedure(pool.clone(),receiver);
+        self.event_procedure(pool.clone(),sender.clone(),receiver);
     }
 }
