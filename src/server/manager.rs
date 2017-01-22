@@ -708,6 +708,19 @@ impl Manager
         room.add_new_user(Arc::downgrade(&user_rc.clone()));
         let mut user = Arc::get_mut(&mut user_rc).unwrap();
         user.enter_room(room.get_name());   
+
+        event_sender.send(EventMessage::DoNotifySystemMessage
+        {
+            message:SeverNotifyMessage
+            {
+                room_name:room_name,
+                body:SeverNotifyMessageBody::EnterMemberInRoom
+                {
+                    new_member:user_wr,
+                    member_list:room.get_users()
+                }
+            }
+        });
     }
     fn on_exit_room(&mut self,event_sender:Sender<EventMessage>,message:Message)
     {
@@ -759,7 +772,6 @@ impl Manager
         let mut user = Arc::get_mut(user).unwrap();
         user.exit_room(room.get_name());
 
-        //TODO:나갔다는 시스템 메시지를 보낸다.
         event_sender.send(EventMessage::DoNotifySystemMessage
         {
             message:SeverNotifyMessage
