@@ -44,9 +44,8 @@ struct SeverNotifyMessage
 }
 impl SeverNotifyMessage
 {
-    fn to_json_enter_member_in_room(new_member:&Weak<User>, member_list:&Vec<Weak<User>>)->Result<String, ()>
+    fn on_enter_member_in_room(&self,  new_member:&Weak<User>, member_list:&Vec<Weak<User>>)->Result<String, ()>
     {
-        
         let mut json_member_list = JsonValue::new_array();
         for it in member_list
         {
@@ -71,17 +70,55 @@ impl SeverNotifyMessage
         let member_hash_code = member_hash_code.unwrap().get_hashcode();
         let res = object!
         {
+            "type"=>"ENTER_NEW_MEMBER_IN_ROOM",
             "sender"=>member_hash_code,
-            "members"=>json_member_list
+            "members"=>json_member_list,
+            "room"=>self.room_name.clone()
+        };
+        return Ok(res.dump());
+    }
+    fn on_exit_member_from_room(&self, exit_member:&Weak<User>, member_list:&Vec<Weak<User>>)->Result<String, ()>
+    {
+         let mut json_member_list = JsonValue::new_array();
+        for it in member_list
+        {
+            let it = it.upgrade();
+            if let None = it
+            {
+                continue;
+            }
+            let it = it.unwrap();
+            let member = object!
+            {
+                "hash_id"=>it.get_hashcode(),
+                "name"=>it.get_nickname()
+            };
+            json_member_list.push(member);
+        }
+        let member_hash_code = exit_member.upgrade();
+        if let None = member_hash_code
+        {
+            return Err(());
+        }
+        let member_hash_code = member_hash_code.unwrap().get_hashcode();
+        let res = object!
+        {
+            "type"=>"EXIT_MEMBER_FROM_ROOM",
+            "sender"=>member_hash_code,
+            "members"=>json_member_list,
+            "room"=>self.room_name.clone()
         };
         return Ok(res.dump());
     }
     fn to_json_text(&self)->Result<String,()>
     {
+        use self::SeverNotifyMessage;
         return match self.body
         {
             SeverNotifyMessageBody::EnterMemberInRoom{ref new_member,ref member_list}=>
-            SeverNotifyMessage::to_json_enter_member_in_room(new_member,member_list),
+            self.on_enter_member_in_room(new_member, member_list),
+            SeverNotifyMessageBody::ExitMemberFromRoom{ref exit_member, ref member_list}=>
+            self.on_exit_member_from_room(exit_member,member_list),
             _=>Err(())
         };
     }
@@ -767,7 +804,6 @@ impl Manager
     }
     fn on_exit_room(&mut self,event_sender:Sender<EventMessage>,message:Message)
     {
-        let mut user:Option<Weak<User>> = None;
         let mut user_index_in_users:Option<usize> = None;
 
         let user_hash_code = message.get_user_id();
