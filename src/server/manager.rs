@@ -44,6 +44,10 @@ struct SeverNotifyMessage
 }
 impl SeverNotifyMessage
 {
+    fn get_room_name(&self)->String
+    {
+        self.room_name.clone()
+    }
     fn on_enter_member_in_room(&self,  new_member:&Weak<User>, member_list:&Vec<Weak<User>>)->Result<String, ()>
     {
         let mut json_member_list = JsonValue::new_array();
@@ -607,7 +611,8 @@ impl Manager
             let user_rc = Weak::upgrade(&users[i]);
             if let None = user_rc
             {
-                room.remove_user(i);
+                //room.remove_user(i);
+                //TODO:검색하다 메모리가 해제된 객체들은 어떻게 할 껀지 생각해 봐야 겠다.
                 continue;
             }
             let user = user_rc.unwrap();
@@ -867,7 +872,77 @@ impl Manager
     fn on_do_notify_system_message(&mut self, sender:Sender<EventMessage>, pool:ThreadPool, message:SeverNotifyMessage)
     {
         //TODO:작성해야 함.
+        //해당 메시지가 보내진 방 안에 있는 유저이 수신하는 소켓를 구한다.
+        let mut output_streams:Vec<(String,Arc<Mutex< TcpStream>>)> = Vec::new();
+        let room_name = message.get_room_name();
 
+        if self.rooms.contains_key(&room_name) == false
+        {
+            return;
+        }
+        let mut room = self.rooms.get_mut(&room_name).unwrap();
+        let users = room.get_users();
+        let user_count = users.len();
+
+        for i in 0..user_count
+        {
+            let user_rc = Weak::upgrade(&users[i]);
+            if let None = user_rc
+            {
+                continue;
+            }
+            let user = user_rc.unwrap();
+            let stream = self.output_streams.get(&user.get_hashcode());
+            if let None = stream
+            {
+                continue;
+            }
+            output_streams.push(
+                (user.get_hashcode(), stream.unwrap().clone())
+            );
+        }
+        //별도의 흐름에서 스레드 큐에 집어 넣는다.
+        thread::spawn(move||
+        {
+            let msg = message.to_json_text();
+            if let Err( _ ) = msg
+            {
+                return;
+            }
+
+            let msg = Arc::new(msg.unwrap().into_bytes());
+            for (user_hash_id, stream) in output_streams
+            {
+                let msg = msg.clone();
+                let sender = sender.clone();
+                let lamda = |mut stream:&TcpStream, bytes:Arc<Vec<u8>>|->bool
+                {
+                    match stream.write_all(&bytes) {
+                        Ok(_) => match stream.write_all(b"\n"){
+                            Ok(_)=>true,
+                            Err(_)=>false
+                        },
+                        Err(_) => false,
+                    }
+                };
+                pool.execute(move||
+                {
+                    let  stream = stream.lock();
+                    if let Err(e) = stream
+                    {
+                        println!("{}",e);
+                        return;
+                    }
+                    let mut stream = stream.unwrap();
+                    
+                    if lamda(&mut stream,msg.clone()) == false
+                    {
+                        let e = EventMessage::DisconnectOutputSocket{user_hash_code:user_hash_id};
+                        sender.send(e).unwrap();
+                    }
+                });
+            }
+        });
     }
     
     fn on_exit_sever(&mut self, sender:Sender<EventMessage>, user_hash_code:String)
