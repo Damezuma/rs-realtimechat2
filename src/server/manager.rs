@@ -22,15 +22,16 @@ enum SeverNotifyMessageBody
     EnterMemberInRoom
     {
         new_member:Weak<User>,
-        list:Vec<Weak<User>>
+        member_list:Vec<Weak<User>>
     },
     ExitMemberFromRoom
     {
         exit_member:Weak<User>,
-        list:Vec<Weak<User>>
+        member_list:Vec<Weak<User>>
     },
     ChangeNickName
     {
+        user_hash_code:String,
         prev_name:String,
         new_name:String
     }
@@ -754,15 +755,29 @@ impl Manager
         }
         let index:usize = index.unwrap();
         room.remove_user(index);
+        let user_wr = Arc::downgrade(&user);
         let mut user = Arc::get_mut(user).unwrap();
         user.exit_room(room.get_name());
 
         //TODO:나갔다는 시스템 메시지를 보낸다.
+        event_sender.send(EventMessage::DoNotifySystemMessage
+        {
+            message:SeverNotifyMessage
+            {
+                room_name:room_name,
+                body:SeverNotifyMessageBody::ExitMemberFromRoom
+                {
+                    exit_member:user_wr,
+                    member_list:room.get_users()
+                }
+            }
+        });
     }
     fn on_do_notify_system_message(&mut self, sender:Sender<EventMessage>, pool:ThreadPool, message:SeverNotifyMessage)
     {
         //TODO:작성해야 함.
     }
+    
     fn on_exit_sever(&mut self, sender:Sender<EventMessage>, user_hash_code:String)
     {
         let mut index_user_in_users:Option<usize> = None;
@@ -832,6 +847,7 @@ impl Manager
         self.output_streams.remove(&user_hash_code);
         
         //TODO:나갔다는 시스템 메시지를 보낸다.
+
     }
     fn event_procedure(&mut self, pool:ThreadPool,sender:Sender<EventMessage>, receiver:Receiver<EventMessage>)->bool
     {
