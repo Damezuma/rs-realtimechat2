@@ -7,6 +7,10 @@ impl User{
     pub fn new(nickname:String, hashcode:String)->User{
         return User{nickname:nickname,hashcode:hashcode,entered_room_names:Vec::new()};
     }
+    pub fn get_entered_room_names(&self)->Vec<String>
+    {
+        return self.entered_room_names.clone();
+    }
     pub fn enter_room(&mut self, room_name:String)
     {
         let mut already_entered = false;

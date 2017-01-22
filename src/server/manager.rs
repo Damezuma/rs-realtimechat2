@@ -65,6 +65,10 @@ enum EventMessage
     {
         user_hash_code:String
     },
+    ExitSeverUser
+    {
+        user_hash_code:String
+    },
     ChangeNickname
     {
         user_hash_code:String,
@@ -404,6 +408,7 @@ impl Manager
                     MessageBody::PlainText{..}=>Some(EventMessage::ComeChatMessage{message:message}),
                     MessageBody::EnterRoom=>Some(EventMessage::EnterRoom{message:message}),
                     MessageBody::ExitRoom=>Some(EventMessage::ExitRoom{message:message}),
+                    MessageBody::ExitSever=>Some(EventMessage::ExitSeverUser{user_hash_code:input_stream.get_user_id()}),
                     _=>
                     {
                         //TODO:그 외에 다른 메시지의 처리도 필요하다.
@@ -507,31 +512,32 @@ impl Manager
         //해당 메시지가 보내진 방 안에 있는 유저이 수신하는 소켓를 구한다.
         let mut output_streams:Vec<(String,Arc<Mutex< TcpStream>>)> = Vec::new();
         let room_name = message.get_room_name();
-        match self.rooms.get_mut(&room_name)
+
+        if self.rooms.contains_key(&room_name) == false
         {
-            None=>{},
-            Some(ref mut room)=>
+            return;
+        }
+        let mut room = self.rooms.get_mut(&room_name).unwrap();
+        let users = room.get_users();
+        let user_count = users.len();
+
+        for i in 0..user_count
+        {
+            let user_rc = Weak::upgrade(&users[i]);
+            if let None = user_rc
             {
-                let users = room.get_users();
-                let user_count = users.len();
-                for i in 0..user_count
-                {
-                    let user_wr = &users[user_count];
-                    if let Some(user) = Weak::upgrade(&user_wr)
-                    {
-                        if let Some(v) = self.output_streams.get(&user.get_hashcode())
-                        {
-                            output_streams.push(
-                                (user.get_hashcode(), v.clone())
-                            );
-                        }
-                    }
-                    else
-                    {
-                        room.remove_user(i);
-                    }
-                }
+                room.remove_user(i);
+                continue;
             }
+            let user = user_rc.unwrap();
+            let stream = self.output_streams.get(&user.get_hashcode());
+            if let None = stream
+            {
+                continue;
+            }
+            output_streams.push(
+                (user.get_hashcode(), stream.unwrap().clone())
+            );
         }
         //별도의 흐름에서 스레드 큐에 집어 넣는다.
         thread::spawn(move||
@@ -570,7 +576,7 @@ impl Manager
             }
         });
     }
-    fn on_disconnectoutputstream(&mut self, user_hash_id:String)
+    fn on_disconnectoutputstream(&mut self, sender:Sender<EventMessage>, user_hash_id:String)
     {
         //연결이 끊긴 유저 정보를 지운다.
         let len = self.users.len();
@@ -594,7 +600,7 @@ impl Manager
             }
         }
     }
-    fn on_disconnectinputstream(&mut self, user_hash_id:String)
+    fn on_disconnectinputstream(&mut self, sender:Sender<EventMessage>, user_hash_id:String)
     {
         //연결이 끊긴 유저 정보를 지운다.
         let len = self.users.len();
@@ -618,6 +624,7 @@ impl Manager
             }
         }
         //TODO:그리고 해당 유저가 있던 방의 유저들에게 새로운 유저목록을 준다.
+        
     }
     fn on_init_connect_outputstream(&mut self, sender:Sender<EventMessage>, user_hash_code:String, stream:TcpStream)
     {
@@ -648,57 +655,65 @@ impl Manager
                 break;
             }
         }
-        if let Some(user) = user
-        {
-            let room_name = message.get_room_name();
-            if self.rooms.contains_key(&room_name) == false
-            {
-                self.rooms.insert(room_name.clone(), Room::new(room_name.clone()));
-            }
-            let mut room =self.rooms.get_mut(&room_name).unwrap();
-            let users_in_room:Vec<Weak<User>> = room.get_users();
-            let len = users_in_room.len();
-            let mut is_already_in = false;
-            for i in 0..len
-            {
-                if let Some(it) = users_in_room[i].upgrade()
-                {
-                    if it.get_hashcode() == user_hash_code
-                    {
-                        is_already_in = true;
-                        break;
-                    }
-                }
-            }
-            if is_already_in != false
-            {
-                return;
-            }
-
-            //TODO:들어왔다는 시스템 메시지를 보낸다.
-            let mut user_rc = user.upgrade().unwrap();
-            room.add_new_user(Arc::downgrade(&user_rc.clone()));
-            let mut user = Arc::get_mut(&mut user_rc).unwrap();
-            user.enter_room(room.get_name());   
-        }
-    }
-    fn on_exit_room(&mut self,event_sender:Sender<EventMessage>,message:Message)
-    {
-        let mut user:Option<Weak<User>> = None;
-        let user_hash_code = message.get_user_id();
-        for it in &self.users
-        {
-            if it.get_hashcode() == user_hash_code
-            {
-                user = Some(Arc::downgrade(&it));
-                break;
-            }
-        }
         if let None = user
         {
             return;
         }
-        let mut user = user.unwrap();
+        let user = user.unwrap();
+        let room_name = message.get_room_name();
+        if self.rooms.contains_key(&room_name) == false
+        {
+            self.rooms.insert(room_name.clone(), Room::new(room_name.clone()));
+        }
+        let mut room =self.rooms.get_mut(&room_name).unwrap();
+        let users_in_room:Vec<Weak<User>> = room.get_users();
+        let len = users_in_room.len();
+        let mut is_already_in = false;
+        for i in 0..len
+        {
+            let it = users_in_room[i].upgrade();
+            if let None = it
+            {
+                continue;
+            }
+            let it = it.unwrap();
+            if it.get_hashcode() == user_hash_code
+            {
+                is_already_in = true;
+                break;
+            }
+        }
+        if is_already_in != false
+        {
+            return;
+        }
+
+        //TODO:들어왔다는 시스템 메시지를 보낸다.
+        let mut user_rc = user.upgrade().unwrap();
+        room.add_new_user(Arc::downgrade(&user_rc.clone()));
+        let mut user = Arc::get_mut(&mut user_rc).unwrap();
+        user.enter_room(room.get_name());   
+    }
+    fn on_exit_room(&mut self,event_sender:Sender<EventMessage>,message:Message)
+    {
+        let mut user:Option<Weak<User>> = None;
+        let mut user_index_in_users:Option<usize> = None;
+
+        let user_hash_code = message.get_user_id();
+        let len = self.users.len();
+        for i in 0..len
+        {
+            if self.users[i].get_hashcode() == user_hash_code
+            {
+                user_index_in_users = Some(i);
+                break;
+            }
+        }
+        if let None = user_index_in_users
+        {
+            return;
+        }
+        let ref mut user = self.users[user_index_in_users.unwrap()];
         let room_name = message.get_room_name();
         if self.rooms.contains_key(&room_name) == false
         {
@@ -725,14 +740,84 @@ impl Manager
         }
         let index:usize = index.unwrap();
         room.remove_user(index);
-        let mut user_rc = user.upgrade().unwrap();
-        let mut user = Arc::get_mut(&mut user_rc).unwrap();
+        let mut user = Arc::get_mut(user).unwrap();
         user.exit_room(room.get_name());
+
         //TODO:나갔다는 시스템 메시지를 보낸다.
     }
     fn on_do_notify_system_message(&mut self, sender:Sender<EventMessage>, pool:ThreadPool, message:SeverNotifyMessage)
     {
         //TODO:작성해야 함.
+    }
+    fn on_exit_sever(&mut self, sender:Sender<EventMessage>, user_hash_code:String)
+    {
+        let mut index_user_in_users:Option<usize> = None;
+        let len = self.users.len();
+        for i in 0..len
+        {
+            let it = &self.users[i];
+            if it.get_hashcode() == user_hash_code
+            {
+                index_user_in_users = Some(i);
+                break;
+            }
+        }
+        if let None = index_user_in_users
+        {
+            return;
+        }
+        let user = self.users.remove(index_user_in_users.unwrap());
+        let rooms_user_entered = user.get_entered_room_names();
+        for it in &rooms_user_entered
+        {
+            let room = self.rooms.get_mut(it);
+            if let None = room
+            {
+                continue;
+            }
+            let mut room = room.unwrap();
+            let users_in_room = room.get_users();
+            let mut index:Option<usize> = None;
+            let len = users_in_room.len();
+            for i in 0..len
+            {
+                let it = users_in_room[i].upgrade();
+                if let None = it
+                {
+                    continue;
+                }
+                let it = it.unwrap();
+                if it.get_hashcode() == user_hash_code
+                {
+                    index = Some(i);
+                    break;
+                }
+            }
+            if let None = index
+            {
+                continue;
+            }
+            room.remove_user(index.unwrap());
+        }
+        //스트림을 닫는다.
+        let mut index:Option<usize> = None;
+        let len = self.input_streams.len();
+        for i in 0..len
+        {
+            let it = &self.input_streams[i];
+            if it.get_user_id() == user_hash_code
+            {
+                index = Some(i);
+                break;
+            }
+        }
+        if let Some(index) = index
+        {
+            self.input_streams.swap_remove(index);
+        }
+        self.output_streams.remove(&user_hash_code);
+        
+        //TODO:나갔다는 시스템 메시지를 보낸다.
     }
     fn event_procedure(&mut self, pool:ThreadPool,sender:Sender<EventMessage>, receiver:Receiver<EventMessage>)->bool
     {
@@ -752,9 +837,9 @@ impl Manager
                 EventMessage::ComeChatMessage{message}=>
                     self.on_come_chat_message(sender.clone(),pool.clone(),message),
                 EventMessage::DisconnectOutputSocket{user_hash_code}=>
-                    self.on_disconnectoutputstream(user_hash_code),
+                    self.on_disconnectoutputstream(sender.clone(), user_hash_code),
                 EventMessage::DisconnectInputSocket{user_hash_code}=>
-                    self.on_disconnectinputstream(user_hash_code),
+                    self.on_disconnectinputstream(sender.clone(), user_hash_code),
                 EventMessage::ChangeNickname{user_hash_code, new_nickname}=>
                     self.on_change_nickname(sender.clone(),user_hash_code,new_nickname),
                 EventMessage::EnterRoom{message}=>
@@ -762,7 +847,9 @@ impl Manager
                 EventMessage::ExitRoom{message}=>
                     self.on_exit_room(sender.clone(),message),
                 EventMessage::DoNotifySystemMessage{message}=>
-                    self.on_do_notify_system_message(sender.clone(),pool.clone(),message)
+                    self.on_do_notify_system_message(sender.clone(),pool.clone(),message),
+                EventMessage::ExitSeverUser{user_hash_code}=>
+                    self.on_exit_sever(sender.clone(), user_hash_code)
             }
         }
         return false;
