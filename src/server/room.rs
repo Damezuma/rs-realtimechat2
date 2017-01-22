@@ -31,4 +31,15 @@ impl Room
     {
        self.users.swap_remove(index);
     }
+    pub fn check_exit_users(&mut self)
+    {
+        self.users.retain(|ref x|
+        {
+            match x.upgrade()
+            {
+                Some(..)=>true,
+                None=>false
+            }
+        });
+    }
 }
