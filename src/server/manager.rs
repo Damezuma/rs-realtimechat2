@@ -627,13 +627,23 @@ impl Manager
     }
     fn on_init_connect_outputstream(&mut self, sender:Sender<EventMessage>, user_hash_code:String, stream:TcpStream)
     {
-        for it in &self.users
+        
+        for it in &mut self.users
         {
             if it.get_hashcode() == user_hash_code
             {
                 let wrapper = Arc::new(Mutex::new(stream));
                 self.output_streams.insert(user_hash_code,wrapper);
+                
+                
+                if let Some(user) = Arc::get_mut(it)
+                {
+                    user.enter_room(String::from("lounge"));
+                } 
+                else
+                {
 
+                }
                 let mut lounge = self.rooms.get_mut("lounge").unwrap();
                 lounge.add_new_user(Arc::downgrade(it));
                 //TODO: 새로운 멤버가 왔다는 시스템 메시지를 보내게 만든다.
