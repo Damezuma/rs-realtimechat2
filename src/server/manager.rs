@@ -497,13 +497,12 @@ impl Manager
             }
         });
     }
-    fn on_init_connect_inputstream(&mut self, user:User, stream:InputStream)
+    fn on_init_connect_inputstream(&mut self, sender:Sender<EventMessage>, user:User, stream:InputStream)
     {
         let s = Arc::new(stream);
         let rc = Arc::new(user);
-        self.users.push(rc.clone());
-        let mut lounge = self.rooms.get_mut("lounge").unwrap();
-        lounge.add_new_user(Arc::downgrade(&rc));
+        self.users.push(rc);
+
         self.input_streams.push(s.clone());
         self.read_channel_send.send(Arc::downgrade(&s));
     }
@@ -634,9 +633,14 @@ impl Manager
             {
                 let wrapper = Arc::new(Mutex::new(stream));
                 self.output_streams.insert(user_hash_code,wrapper);
+
+                let mut lounge = self.rooms.get_mut("lounge").unwrap();
+                lounge.add_new_user(Arc::downgrade(it));
+                //TODO: 새로운 멤버가 왔다는 시스템 메시지를 보내게 만든다.
                 return;
             }
         }
+        
     }
     fn on_change_nickname(&mut self,event_sender:Sender<EventMessage>, user_hash_code:String, new_nickname:String)
     {
@@ -831,7 +835,7 @@ impl Manager
             match received_item.unwrap()
             {
                 EventMessage::InitConnectInputPort{user,stream}=>
-                    self.on_init_connect_inputstream(user,stream),
+                    self.on_init_connect_inputstream(sender.clone(),user,stream),
                 EventMessage::InitConnectOutputPort{user_hash_code,stream}=>
                     self.on_init_connect_outputstream(sender.clone(),user_hash_code,stream),
                 EventMessage::ComeChatMessage{message}=>
