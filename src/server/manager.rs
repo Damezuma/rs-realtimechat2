@@ -17,6 +17,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::net::{TcpListener, TcpStream};
 use self::threadpool::ThreadPool;
 use self::chrono::offset::utc::UTC;
+use self::json::JsonValue;
 enum SeverNotifyMessageBody
 {
     EnterMemberInRoom
@@ -41,7 +42,50 @@ struct SeverNotifyMessage
     body:SeverNotifyMessageBody,
     room_name:String 
 }
-
+impl SeverNotifyMessage
+{
+    fn to_json_enter_member_in_room(new_member:&Weak<User>, member_list:&Vec<Weak<User>>)->Result<String, ()>
+    {
+        
+        let mut json_member_list = JsonValue::new_array();
+        for it in member_list
+        {
+            let it = it.upgrade();
+            if let None = it
+            {
+                continue;
+            }
+            let it = it.unwrap();
+            let member = object!
+            {
+                "hash_id"=>it.get_hashcode(),
+                "name"=>it.get_nickname()
+            };
+            json_member_list.push(member);
+        }
+        let member_hash_code = new_member.upgrade();
+        if let None = member_hash_code
+        {
+            return Err(());
+        }
+        let member_hash_code = member_hash_code.unwrap().get_hashcode();
+        let res = object!
+        {
+            "sender"=>member_hash_code,
+            "members"=>json_member_list
+        };
+        return Ok(res.dump());
+    }
+    fn to_json_text(&self)->Result<String,()>
+    {
+        return match self.body
+        {
+            SeverNotifyMessageBody::EnterMemberInRoom{ref new_member,ref member_list}=>
+            SeverNotifyMessage::to_json_enter_member_in_room(new_member,member_list),
+            _=>Err(())
+        };
+    }
+}
 enum EventMessage
 {
     InitConnectInputPort
@@ -702,8 +746,7 @@ impl Manager
         {
             return;
         }
-
-        //TODO:들어왔다는 시스템 메시지를 보낸다.
+        let user_wc = user.clone();
         let mut user_rc = user.upgrade().unwrap();
         room.add_new_user(Arc::downgrade(&user_rc.clone()));
         let mut user = Arc::get_mut(&mut user_rc).unwrap();
@@ -716,7 +759,7 @@ impl Manager
                 room_name:room_name,
                 body:SeverNotifyMessageBody::EnterMemberInRoom
                 {
-                    new_member:user_wr,
+                    new_member:user_wc,
                     member_list:room.get_users()
                 }
             }
@@ -788,6 +831,7 @@ impl Manager
     fn on_do_notify_system_message(&mut self, sender:Sender<EventMessage>, pool:ThreadPool, message:SeverNotifyMessage)
     {
         //TODO:작성해야 함.
+
     }
     
     fn on_exit_sever(&mut self, sender:Sender<EventMessage>, user_hash_code:String)
