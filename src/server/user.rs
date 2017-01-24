@@ -50,4 +50,5 @@ impl User{
     pub fn get_hashcode(&self)->String{
         return self.hashcode.clone();
     }
+    
 }

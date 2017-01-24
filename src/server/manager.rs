@@ -25,6 +25,11 @@ enum SeverNotifyMessageBody
         new_member:Weak<User>,
         member_list:Vec<Weak<User>>
     },
+    DisconnectUser
+    {
+        user_hash_code:String,
+        member_list:Vec<Weak<User>>
+    },
     ExitMemberFromRoom
     {
         exit_member:Weak<User>,
@@ -83,7 +88,7 @@ impl SeverNotifyMessage
     }
     fn on_exit_member_from_room(&self, exit_member:&Weak<User>, member_list:&Vec<Weak<User>>)->Result<String, ()>
     {
-         let mut json_member_list = JsonValue::new_array();
+        let mut json_member_list = JsonValue::new_array();
         for it in member_list
         {
             let it = it.upgrade();
@@ -114,6 +119,33 @@ impl SeverNotifyMessage
         };
         return Ok(res.dump());
     }
+    fn on_disconnect_user(&self, user_hash_code:&str, member_list:&Vec<Weak<User>>)->Result<String, ()>
+    {
+        let mut json_member_list = JsonValue::new_array();
+        for it in member_list
+        {
+            let it = it.upgrade();
+            if let None = it
+            {
+                continue;
+            }
+            let it = it.unwrap();
+            let member = object!
+            {
+                "hash_id"=>it.get_hashcode(),
+                "name"=>it.get_nickname()
+            };
+            json_member_list.push(member);
+        }
+        let res = object!
+        {
+            "type"=>"DISCONNECT_USER",
+            "sender"=>String::from(user_hash_code),
+            "members"=>json_member_list,
+            "room"=>self.room_name.clone()
+        };
+        return Ok(res.dump());
+    }
     fn to_json_text(&self)->Result<String,()>
     {
         use self::SeverNotifyMessage;
@@ -123,6 +155,8 @@ impl SeverNotifyMessage
             self.on_enter_member_in_room(new_member, member_list),
             SeverNotifyMessageBody::ExitMemberFromRoom{ref exit_member, ref member_list}=>
             self.on_exit_member_from_room(exit_member,member_list),
+            SeverNotifyMessageBody::DisconnectUser{ref user_hash_code, ref member_list}=>
+            self.on_disconnect_user(user_hash_code,member_list),
             _=>Err(())
         };
     }
@@ -201,7 +235,7 @@ fn check_handshake(mut stream: TcpStream)->Result<(User, InputStream), ()>
             return Err(());
         }
     }
-    // TODO:처음 들어오는 내용은 HandShake헤더다.
+    //처음 들어오는 내용은 HandShake헤더다.
 
     let string_connected_first = String::from_utf8(string_memory_block);
     if let Err(e) = string_connected_first
@@ -557,7 +591,6 @@ impl Manager
     {
         
         let mut listener = self.output_socket_listener.clone();
-        //TODO:해야한다.
         thread::spawn(move||
         {
             for stream in listener.incoming()
@@ -664,42 +697,56 @@ impl Manager
     }
     fn on_disconnectoutputstream(&mut self, sender:Sender<EventMessage>, user_hash_id:String)
     {
+
         //연결이 끊긴 유저 정보를 지운다.
         let len = self.users.len();
+        let mut user:Option<Arc<User>> = None;
         for i in 0..len
         {
             if self.users[i].get_hashcode() == user_hash_id
             {
-                self.users.swap_remove(i);
+                user = Some(self.users.swap_remove(i));
                 break;
             }
         }
-        self.output_streams.remove(&user_hash_id);
-
-        let len = self.input_streams.len();
-        for i in 0..len
+        if let None = user
         {
-            if self.input_streams[i].get_user_id() == user_hash_id
-            {
-                self.input_streams.swap_remove(i);
-                break;
-            }
+            return;
         }
-    }
-    fn on_disconnectinputstream(&mut self, sender:Sender<EventMessage>, user_hash_id:String)
-    {
-        //연결이 끊긴 유저 정보를 지운다.
-        let len = self.users.len();
-        for i in 0..len
-        {
-            if self.users[i].get_hashcode() == user_hash_id
-            {
-                self.users.swap_remove(i);
-                break;
-            }
-        }
-        self.output_streams.remove(&user_hash_id);
+        let user = user.unwrap();
 
+        self.output_streams.remove(&user_hash_id);
+        
+        //연결이 끊긴 유저가 들어간 각 방의 유저정보를 정리한다.
+        let room_names_in_user = user.get_entered_room_names();
+        for room_name in &room_names_in_user
+        {
+            let room = self.rooms.get_mut(room_name);
+            if let None = room
+            {
+                continue;
+            }
+            let mut room = room.unwrap();
+            let users = room.get_users();
+            let mut new_users:Vec<Weak<User>> = Vec::new();
+            for user in users
+            {
+                let user_wr = user.clone();
+                let user = user.upgrade();
+                if let None =user
+                {
+                    continue;
+                }
+                
+                let user = user.unwrap();
+                if user.get_hashcode() != user_hash_id
+                {
+                    new_users.push(user_wr);
+                }
+            }
+            room.set_users(new_users);
+        }
+        //
         let len = self.input_streams.len();
         for i in 0..len
         {
@@ -710,7 +757,80 @@ impl Manager
             }
         }
         //TODO:그리고 해당 유저가 있던 방의 유저들에게 새로운 유저목록을 준다.
-        
+    }
+    fn on_disconnectinputstream(&mut self, event_sender:Sender<EventMessage>, user_hash_id:String)
+    {
+        //연결이 끊긴 유저 정보를 지운다.
+        let len = self.users.len();
+        let mut user:Option<Arc<User>> = None;
+        for i in 0..len
+        {
+            if self.users[i].get_hashcode() == user_hash_id
+            {
+                user = Some(self.users.swap_remove(i));
+                break;
+            }
+        }
+        if let None = user
+        {
+            return;
+        }
+        let user = user.unwrap();
+
+        self.output_streams.remove(&user_hash_id);
+        //연결이 끊긴 유저가 들어간 각 방의 유저정보를 정리한다.
+        let room_names_in_user = user.get_entered_room_names();
+        for room_name in &room_names_in_user
+        {
+            let room = self.rooms.get_mut(room_name);
+            if let None = room
+            {
+                continue;
+            }
+            let mut room = room.unwrap();
+            let users = room.get_users();
+            let mut new_users:Vec<Weak<User>> = Vec::new();
+            for user in users
+            {
+                let user_wr = user.clone();
+                let user = user.upgrade();
+                if let None =user
+                {
+                    continue;
+                }
+                
+                let user = user.unwrap();
+                if user.get_hashcode() != user_hash_id
+                {
+                    new_users.push(user_wr);
+                }
+            }
+            room.set_users(new_users.clone());
+            //그리고 해당 방에 있는 유저들에게 접속이 끊긴 유저가 방을 나갔다고 알린다.
+            event_sender.send(EventMessage::DoNotifySystemMessage
+            {
+                message:SeverNotifyMessage
+                {
+                    room_name:room_name.clone(),
+                    body:SeverNotifyMessageBody::DisconnectUser
+                    {
+                        user_hash_code:user_hash_id.clone(),
+                        member_list:new_users
+                    }
+                }
+            });
+        }
+        //
+
+        let len = self.input_streams.len();
+        for i in 0..len
+        {
+            if self.input_streams[i].get_user_id() == user_hash_id
+            {
+                self.input_streams.swap_remove(i);
+                break;
+            }
+        }
     }
     fn on_init_connect_outputstream(&mut self, sender:Sender<EventMessage>, user_hash_code:String, stream:TcpStream)
     {

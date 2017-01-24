@@ -42,4 +42,8 @@ impl Room
             }
         });
     }
+    pub fn set_users(&mut self, users:Vec<Weak<User>>)
+    {
+        self.users = users
+    }
 }
