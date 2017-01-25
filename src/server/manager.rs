@@ -18,7 +18,7 @@ use std::net::{TcpListener, TcpStream};
 use self::threadpool::ThreadPool;
 use self::chrono::offset::utc::UTC;
 use self::json::JsonValue;
-enum SeverNotifyMessageBody
+enum ServerNotifyMessageBody
 {
     EnterMemberInRoom
     {
@@ -42,12 +42,12 @@ enum SeverNotifyMessageBody
         new_name:String
     }
 }
-struct SeverNotifyMessage
+struct ServerNotifyMessage
 {
-    body:SeverNotifyMessageBody,
+    body:ServerNotifyMessageBody,
     room_name:String 
 }
-impl SeverNotifyMessage
+impl ServerNotifyMessage
 {
     fn get_room_name(&self)->String
     {
@@ -148,14 +148,14 @@ impl SeverNotifyMessage
     }
     fn to_json_text(&self)->Result<String,()>
     {
-        use self::SeverNotifyMessage;
+        use self::ServerNotifyMessage;
         return match self.body
         {
-            SeverNotifyMessageBody::EnterMemberInRoom{ref new_member,ref member_list}=>
+            ServerNotifyMessageBody::EnterMemberInRoom{ref new_member,ref member_list}=>
             self.on_enter_member_in_room(new_member, member_list),
-            SeverNotifyMessageBody::ExitMemberFromRoom{ref exit_member, ref member_list}=>
+            ServerNotifyMessageBody::ExitMemberFromRoom{ref exit_member, ref member_list}=>
             self.on_exit_member_from_room(exit_member,member_list),
-            SeverNotifyMessageBody::DisconnectUser{ref user_hash_code, ref member_list}=>
+            ServerNotifyMessageBody::DisconnectUser{ref user_hash_code, ref member_list}=>
             self.on_disconnect_user(user_hash_code,member_list),
             _=>Err(())
         };
@@ -185,7 +185,7 @@ enum EventMessage
     {
         user_hash_code:String
     },
-    ExitSeverUser
+    ExitServerUser
     {
         user_hash_code:String
     },
@@ -204,7 +204,7 @@ enum EventMessage
     },
     DoNotifySystemMessage
     {
-        message:SeverNotifyMessage
+        message:ServerNotifyMessage
     }
 }
 fn check_handshake(mut stream: TcpStream)->Result<(User, InputStream), ()>
@@ -528,7 +528,7 @@ impl Manager
                     MessageBody::PlainText{..}=>Some(EventMessage::ComeChatMessage{message:message}),
                     MessageBody::EnterRoom=>Some(EventMessage::EnterRoom{message:message}),
                     MessageBody::ExitRoom=>Some(EventMessage::ExitRoom{message:message}),
-                    MessageBody::ExitSever=>Some(EventMessage::ExitSeverUser{user_hash_code:input_stream.get_user_id()}),
+                    MessageBody::ExitServer=>Some(EventMessage::ExitServerUser{user_hash_code:input_stream.get_user_id()}),
                     _=>
                     {
                         //TODO:그 외에 다른 메시지의 처리도 필요하다.
@@ -809,10 +809,10 @@ impl Manager
             //그리고 해당 방에 있는 유저들에게 접속이 끊긴 유저가 방을 나갔다고 알린다.
             event_sender.send(EventMessage::DoNotifySystemMessage
             {
-                message:SeverNotifyMessage
+                message:ServerNotifyMessage
                 {
                     room_name:room_name.clone(),
-                    body:SeverNotifyMessageBody::DisconnectUser
+                    body:ServerNotifyMessageBody::DisconnectUser
                     {
                         user_hash_code:user_hash_id.clone(),
                         member_list:new_users
@@ -916,10 +916,10 @@ impl Manager
 
         event_sender.send(EventMessage::DoNotifySystemMessage
         {
-            message:SeverNotifyMessage
+            message:ServerNotifyMessage
             {
                 room_name:room_name,
-                body:SeverNotifyMessageBody::EnterMemberInRoom
+                body:ServerNotifyMessageBody::EnterMemberInRoom
                 {
                     new_member:user_wc,
                     member_list:room.get_users()
@@ -978,10 +978,10 @@ impl Manager
 
         event_sender.send(EventMessage::DoNotifySystemMessage
         {
-            message:SeverNotifyMessage
+            message:ServerNotifyMessage
             {
                 room_name:room_name,
-                body:SeverNotifyMessageBody::ExitMemberFromRoom
+                body:ServerNotifyMessageBody::ExitMemberFromRoom
                 {
                     exit_member:user_wr,
                     member_list:room.get_users()
@@ -989,7 +989,7 @@ impl Manager
             }
         });
     }
-    fn on_do_notify_system_message(&mut self, sender:Sender<EventMessage>, pool:ThreadPool, message:SeverNotifyMessage)
+    fn on_do_notify_system_message(&mut self, sender:Sender<EventMessage>, pool:ThreadPool, message:ServerNotifyMessage)
     {
         //TODO:작성해야 함.
         //해당 메시지가 보내진 방 안에 있는 유저이 수신하는 소켓를 구한다.
@@ -1065,7 +1065,7 @@ impl Manager
         });
     }
     
-    fn on_exit_sever(&mut self, sender:Sender<EventMessage>, user_hash_code:String)
+    fn on_exit_server(&mut self, sender:Sender<EventMessage>, user_hash_code:String)
     {
         let mut index_user_in_users:Option<usize> = None;
         let len = self.users.len();
@@ -1165,8 +1165,8 @@ impl Manager
                     self.on_exit_room(sender.clone(),message),
                 EventMessage::DoNotifySystemMessage{message}=>
                     self.on_do_notify_system_message(sender.clone(),pool.clone(),message),
-                EventMessage::ExitSeverUser{user_hash_code}=>
-                    self.on_exit_sever(sender.clone(), user_hash_code)
+                EventMessage::ExitServerUser{user_hash_code}=>
+                    self.on_exit_server(sender.clone(), user_hash_code)
             }
         }
         return false;
