@@ -745,6 +745,19 @@ impl Manager
                 }
             }
             room.set_users(new_users);
+            //그리고 해당 유저가 있던 방의 유저들에게 새로운 유저목록을 준다.
+            event_sender.send(EventMessage::DoNotifySystemMessage
+            {
+                message:ServerNotifyMessage
+                {
+                    room_name:room_name.clone(),
+                    body:ServerNotifyMessageBody::DisconnectUser
+                    {
+                        user_hash_code:user_hash_id.clone(),
+                        member_list:new_users
+                    }
+                }
+            });
         }
         //
         let len = self.input_streams.len();
@@ -756,7 +769,8 @@ impl Manager
                 break;
             }
         }
-        //TODO:그리고 해당 유저가 있던 방의 유저들에게 새로운 유저목록을 준다.
+        
+        
     }
     fn on_disconnectinputstream(&mut self, event_sender:Sender<EventMessage>, user_hash_id:String)
     {
