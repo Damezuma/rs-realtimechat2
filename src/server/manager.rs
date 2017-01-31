@@ -385,8 +385,8 @@ pub struct Manager
 {
     users:Vec<Arc<User>>,
     rooms:BTreeMap<String,Room>,
-    input_socket_listener:Arc<TcpListener>,
-    output_socket_listener:Arc<TcpListener>,
+    input_socket_listener:Arc<Mutex<TcpListener>>,
+    output_socket_listener:Arc<Mutex<TcpListener>>,
     file_socket_listener:Arc<TcpListener>,
     input_streams:Vec<Arc< InputStream>>,
     output_streams:BTreeMap< String, Arc< Mutex< TcpStream>>>,
@@ -419,8 +419,8 @@ impl Manager
         {
             users:Vec::new(),
             rooms:rooms,
-            input_socket_listener:Arc::new(input_socket_listener),
-            output_socket_listener:Arc::new(output_socket_listener),
+            input_socket_listener:Arc::new(Mutex::new( input_socket_listener)),
+            output_socket_listener:Arc::new(Mutex::new( output_socket_listener)),
             file_socket_listener:Arc::new(file_socket_listener),
             input_streams:Vec::new(),
             output_streams:BTreeMap::new(),
@@ -433,12 +433,7 @@ impl Manager
         let mut input_listener_rc = self.input_socket_listener.clone();
         thread::spawn(move||
         {
-            let input_listener = Arc::get_mut(&mut input_listener_rc);
-            if let None = input_listener
-            {
-                return;
-            }
-            let input_listener = input_listener.unwrap();
+            let input_listener = input_listener_rc.lock().unwrap();
             for stream in input_listener.incoming()
             {
                 if let Err(e) = stream
@@ -446,7 +441,9 @@ impl Manager
                     println!("{}",e);
                     continue;
                 }
+                
                 let stream = stream.unwrap();
+                println!("come new connect {}",stream.peer_addr().unwrap());
                 let sender = sender.clone();
                 //스트림을 받으면 확인을 하자.
                 pool.execute(move||
@@ -593,6 +590,8 @@ impl Manager
         let mut listener = self.output_socket_listener.clone();
         thread::spawn(move||
         {
+            
+            let listener = listener.lock().unwrap();
             for stream in listener.incoming()
             {
                 if let Err(e) = stream
@@ -695,7 +694,7 @@ impl Manager
             }
         });
     }
-    fn on_disconnectoutputstream(&mut self, sender:Sender<EventMessage>, user_hash_id:String)
+    fn on_disconnectoutputstream(&mut self, event_sender:Sender<EventMessage>, user_hash_id:String)
     {
 
         //연결이 끊긴 유저 정보를 지운다.
@@ -744,7 +743,7 @@ impl Manager
                     new_users.push(user_wr);
                 }
             }
-            room.set_users(new_users);
+            room.set_users(new_users.clone());
             //그리고 해당 유저가 있던 방의 유저들에게 새로운 유저목록을 준다.
             event_sender.send(EventMessage::DoNotifySystemMessage
             {
@@ -846,7 +845,7 @@ impl Manager
             }
         }
     }
-    fn on_init_connect_outputstream(&mut self, sender:Sender<EventMessage>, user_hash_code:String, stream:TcpStream)
+    fn on_init_connect_outputstream(&mut self, event_sender:Sender<EventMessage>, user_hash_code:String, stream:TcpStream)
     {
         
         for it in &mut self.users
@@ -868,6 +867,18 @@ impl Manager
                 let mut lounge = self.rooms.get_mut("lounge").unwrap();
                 lounge.add_new_user(Arc::downgrade(it));
                 //TODO: 새로운 멤버가 왔다는 시스템 메시지를 보내게 만든다.
+                event_sender.send(EventMessage::DoNotifySystemMessage
+                {
+                    message:ServerNotifyMessage
+                    {
+                        room_name:lounge.get_name(),
+                        body:ServerNotifyMessageBody::EnterMemberInRoom
+                        {
+                            new_member:Arc::downgrade(it),
+                            member_list:lounge.get_users()
+                        }
+                    }
+                });
                 return;
             }
         }
@@ -1005,7 +1016,6 @@ impl Manager
     }
     fn on_do_notify_system_message(&mut self, sender:Sender<EventMessage>, pool:ThreadPool, message:ServerNotifyMessage)
     {
-        //TODO:작성해야 함.
         //해당 메시지가 보내진 방 안에 있는 유저이 수신하는 소켓를 구한다.
         let mut output_streams:Vec<(String,Arc<Mutex< TcpStream>>)> = Vec::new();
         let room_name = message.get_room_name();
@@ -1190,6 +1200,7 @@ impl Manager
     {
         let pool = ThreadPool::new(128);
         let (sender,receiver) = channel::<EventMessage>();
+        
         self.init_accept_input_stream(sender.clone(),pool.clone());
         self.init_accept_output_stream(sender.clone(),pool.clone());
         self.read_user_msg(sender.clone(),pool.clone());

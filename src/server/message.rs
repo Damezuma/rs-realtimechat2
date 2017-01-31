@@ -9,7 +9,7 @@ pub enum MessageBody{
     Image{bytes:Arc<Vec<u8>>},
     EnterRoom,
     ExitRoom,
-    ExitSever,
+    ExitServer,
     ChangeName{new_name:String},
 
 }
@@ -135,10 +135,7 @@ impl Message
             "TEXT" => MessageBody::PlainText { text: text },
             "IMG" => MessageBody::Image { bytes: Arc::new(Vec::new()) },
             "FILE" => MessageBody::File { bytes: Arc::new(Vec::new()) },
-			"EXIT" =>
-            {
-				return Err(());
-			}
+			"EXIT" =>MessageBody::ExitServer,
             _ => {
                 return Err(());
             }
