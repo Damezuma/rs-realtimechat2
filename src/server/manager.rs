@@ -845,13 +845,15 @@ impl Manager
             }
         }
     }
-    fn on_init_connect_outputstream(&mut self, event_sender:Sender<EventMessage>, user_hash_code:String, stream:TcpStream)
+    fn on_init_connect_outputstream(&mut self, event_sender:Sender<EventMessage>, user_hash_code:String,mut stream: TcpStream)
     {
         
         for it in &mut self.users
         {
             if it.get_hashcode() == user_hash_code
             {
+                stream.write_all(&user_hash_code.bytes()).unwrap();
+                stream.write_all(b"\n").unwrap();
                 let wrapper = Arc::new(Mutex::new(stream));
                 self.output_streams.insert(user_hash_code,wrapper);
                 
