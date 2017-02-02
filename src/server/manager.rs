@@ -852,7 +852,7 @@ impl Manager
         {
             if it.get_hashcode() == user_hash_code
             {
-                stream.write_all(&user_hash_code.bytes()).unwrap();
+                stream.write_all(&user_hash_code.clone().into_bytes()).unwrap();
                 stream.write_all(b"\n").unwrap();
                 let wrapper = Arc::new(Mutex::new(stream));
                 self.output_streams.insert(user_hash_code,wrapper);
