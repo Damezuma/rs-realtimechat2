@@ -30,6 +30,11 @@ enum ServerNotifyMessageBody
         user_hash_code:String,
         member_list:Vec<Weak<User>>
     },
+    ExitServer
+    {
+        user_hash_code:String,
+        member_list:Vec<Weak<User>>
+    },
     ExitMemberFromRoom
     {
         exit_member:Weak<User>,
@@ -146,6 +151,33 @@ impl ServerNotifyMessage
         };
         return Ok(res.dump());
     }
+    fn on_exit_server(&self, user_hash_code:&str, member_list:&Vec<Weak<User>>)->Result<String, ()>
+    {
+        let mut json_member_list = JsonValue::new_array();
+        for it in member_list
+        {
+            let it = it.upgrade();
+            if let None = it
+            {
+                continue;
+            }
+            let it = it.unwrap();
+            let member = object!
+            {
+                "hash_id"=>it.get_hashcode(),
+                "name"=>it.get_nickname()
+            };
+            json_member_list.push(member);
+        }
+        let res = object!
+        {
+            "type"=>"EXIT_SERVER",
+            "sender"=>String::from(user_hash_code),
+            "members"=>json_member_list,
+            "room"=>self.room_name.clone()
+        };
+        return Ok(res.dump());
+    }
     fn to_json_text(&self)->Result<String,()>
     {
         use self::ServerNotifyMessage;
@@ -157,6 +189,8 @@ impl ServerNotifyMessage
             self.on_exit_member_from_room(exit_member,member_list),
             ServerNotifyMessageBody::DisconnectUser{ref user_hash_code, ref member_list}=>
             self.on_disconnect_user(user_hash_code,member_list),
+            ServerNotifyMessageBody::ExitServer{ref user_hash_code, ref member_list}=>
+            self.on_exit_server(user_hash_code,member_list),
             _=>Err(())
         };
     }
@@ -1092,7 +1126,7 @@ impl Manager
         });
     }
     
-    fn on_exit_server(&mut self, sender:Sender<EventMessage>, user_hash_code:String)
+    fn on_exit_server(&mut self, event_sender:Sender<EventMessage>, user_hash_code:String)
     {
         let mut index_user_in_users:Option<usize> = None;
         let len = self.users.len();
@@ -1161,7 +1195,29 @@ impl Manager
         self.output_streams.remove(&user_hash_code);
         
         //TODO:나갔다는 시스템 메시지를 보낸다.
-
+        for it in &rooms_user_entered
+        {
+            let room = self.rooms.get(it);
+            if let None = room
+            {
+                continue;
+            }
+            let room = room.unwrap();
+            let users_in_room = room.get_users();
+            event_sender.send(EventMessage::DoNotifySystemMessage
+            {
+                message:ServerNotifyMessage
+                {
+                    room_name:it.clone(),
+                    body:ServerNotifyMessageBody::ExitServer
+                    {
+                        user_hash_code:user_hash_code.clone(),
+                        member_list:users_in_room
+                    }
+                }
+            });
+        }
+        
     }
     fn event_procedure(&mut self, pool:ThreadPool,sender:Sender<EventMessage>, receiver:Receiver<EventMessage>)->bool
     {
