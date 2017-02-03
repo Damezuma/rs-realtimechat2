@@ -216,6 +216,7 @@ fn check_handshake(mut stream: TcpStream)->Result<(User, InputStream), ()>
     stream.set_nodelay(true);
     stream.set_read_timeout(Some(Duration::new(1, 0)));
     stream.set_write_timeout(Some(Duration::new(1, 0)));
+    
     while message_block_end == false
     {
         if let Ok(read_size) = stream.read(&mut read_bytes)

@@ -5,5 +5,5 @@ mod server;
 fn main() {
     let mut server = server::manager::Manager::new().unwrap();
     server.run();
-
+    
 }
