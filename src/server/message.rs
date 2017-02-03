@@ -136,6 +136,9 @@ impl Message
             "IMG" => MessageBody::Image { bytes: Arc::new(Vec::new()) },
             "FILE" => MessageBody::File { bytes: Arc::new(Vec::new()) },
 			"EXIT" =>MessageBody::ExitServer,
+            "ENTER"=>MessageBody::EnterRoom,
+            "LEAVE"=>MessageBody::ExitRoom,
+            "CHANGE_NAME"=>MessageBody::ChangeName{new_name:text},
             _ => {
                 return Err(());
             }
