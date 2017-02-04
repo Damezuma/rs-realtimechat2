@@ -16,22 +16,22 @@ pub enum MessageBody{
 pub struct Message{
     pub body:MessageBody,
     room_name:String,
-    user_id:String
+    user_hash_id:String
 }
 impl Message
 {
-    fn new(user_id:String, room_name:String, msg_body:MessageBody)->Message
+    fn new(user_hash_id:String, room_name:String, msg_body:MessageBody)->Message
     {
         return Message
         {
-            user_id:user_id,
+            user_hash_id:user_hash_id,
             room_name:room_name,
             body:msg_body
         };
     }
-    pub fn get_user_id(&self)->String
+    pub fn get_user_hash_id(&self)->String
     {
-        return self.user_id.clone();
+        return self.user_hash_id.clone();
     }
     pub fn get_room_name(&self)->String
     {
@@ -45,7 +45,7 @@ impl Message
             MessageBody::PlainText {ref text} =>object!
             {
                 "type"=>"CHAT_SEND",
-                "sender"=>self.get_user_id(),
+                "sender"=>self.get_user_hash_id(),
                 "text"=>text.clone(),
                 "time"=>now_time,
                 "room"=>self.get_room_name()
@@ -53,7 +53,7 @@ impl Message
             _ => {
                 object!
                 {
-                    "sender"=>self.get_user_id(),
+                    "sender"=>self.get_user_hash_id(),
                     "text"=>"",
                     "time"=>now_time,
                     "room"=>""
@@ -63,7 +63,7 @@ impl Message
         let send_message = json::stringify(json_object);
         return Ok(send_message);
     }
-    pub fn from_str(user_id:String,  json_text: &str)->Result<Message, ()>
+    pub fn from_str(user_hash_id:String,  json_text: &str)->Result<Message, ()>
     {
         let json_message = match json::parse(json_text)
         {
@@ -144,6 +144,6 @@ impl Message
             }
         };
         // TODO:여기서 메시지를 조립하여 반환한다.
-        return Ok(Message::new(user_id,room, chat_type));
+        return Ok(Message::new(user_hash_id,room, chat_type));
     }
 }

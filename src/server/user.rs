@@ -1,12 +1,12 @@
 use std::sync::{Arc,Weak,Mutex};
 pub struct User{
     nickname:String,
-    hashcode:String,
+    hash_id:String,
     entered_room_names:Mutex<Vec<String>>
 }
 impl User{
-    pub fn new(nickname:String, hashcode:String)->User{
-        return User{nickname:nickname,hashcode:hashcode,entered_room_names:Mutex::new(Vec::new())};
+    pub fn new(nickname:String, hash_id:String)->User{
+        return User{nickname:nickname,hash_id:hash_id,entered_room_names:Mutex::new(Vec::new())};
     }
     pub fn get_entered_room_names(&self)->Vec<String>
     {
@@ -41,8 +41,8 @@ impl User{
     pub fn get_nickname(&self)->String{
         return self.nickname.clone();
     }
-    pub fn get_hashcode(&self)->String{
-        return self.hashcode.clone();
+    pub fn get_hash_id(&self)->String{
+        return self.hash_id.clone();
     }
     
 }
