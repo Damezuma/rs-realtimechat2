@@ -694,7 +694,7 @@ impl Manager
         {
             return;
         }
-        let mut room = self.rooms.get_mut(&room_name).unwrap();
+        let room = self.rooms.get(&room_name).unwrap();
         let users = room.get_users();
         let user_count = users.len();
 
@@ -1009,7 +1009,7 @@ impl Manager
             return;
         }
         let user_wc = user.clone();
-        let mut user = user.upgrade().unwrap();
+        let user = user.upgrade().unwrap();
         room.add_new_user(user_wc.clone());
         user.enter_room(room.get_name());   
 

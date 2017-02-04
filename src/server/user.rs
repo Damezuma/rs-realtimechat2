@@ -2,11 +2,11 @@ use std::sync::{Arc,Weak,Mutex};
 pub struct User{
     nickname:String,
     hashcode:String,
-    entered_room_names:Arc<Mutex<Vec<String>>>
+    entered_room_names:Mutex<Vec<String>>
 }
 impl User{
     pub fn new(nickname:String, hashcode:String)->User{
-        return User{nickname:nickname,hashcode:hashcode,entered_room_names:Arc::new(Mutex::new(Vec::new()))};
+        return User{nickname:nickname,hashcode:hashcode,entered_room_names:Mutex::new(Vec::new())};
     }
     pub fn get_entered_room_names(&self)->Vec<String>
     {
