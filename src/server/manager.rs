@@ -60,6 +60,8 @@ impl ServerNotifyMessage
     }
     fn on_enter_member_in_room(&self,  new_member:&Weak<User>, member_list:&Vec<Weak<User>>)->Result<String, ()>
     {
+        let now_time = UTC::now();
+        let now_time = now_time.to_rfc2822();
         let mut json_member_list = JsonValue::new_array();
         for it in member_list
         {
@@ -87,12 +89,15 @@ impl ServerNotifyMessage
             "type"=>"ENTER_NEW_MEMBER_IN_ROOM",
             "sender"=>member_hash_code,
             "members"=>json_member_list,
+            "time"=>now_time,
             "room"=>self.room_name.clone()
         };
         return Ok(res.dump());
     }
     fn on_exit_member_from_room(&self, exit_member:&Weak<User>, member_list:&Vec<Weak<User>>)->Result<String, ()>
     {
+        let now_time = UTC::now();
+        let now_time = now_time.to_rfc2822();
         let mut json_member_list = JsonValue::new_array();
         for it in member_list
         {
@@ -120,12 +125,15 @@ impl ServerNotifyMessage
             "type"=>"EXIT_MEMBER_FROM_ROOM",
             "sender"=>member_hash_code,
             "members"=>json_member_list,
+            "time"=>now_time,
             "room"=>self.room_name.clone()
         };
         return Ok(res.dump());
     }
     fn on_disconnect_user(&self, user_hash_code:&str, member_list:&Vec<Weak<User>>)->Result<String, ()>
     {
+        let now_time = UTC::now();
+        let now_time = now_time.to_rfc2822();
         let mut json_member_list = JsonValue::new_array();
         for it in member_list
         {
@@ -147,12 +155,15 @@ impl ServerNotifyMessage
             "type"=>"DISCONNECT_USER",
             "sender"=>String::from(user_hash_code),
             "members"=>json_member_list,
+            "time"=>now_time,
             "room"=>self.room_name.clone()
         };
         return Ok(res.dump());
     }
     fn on_exit_server(&self, user_hash_code:&str, member_list:&Vec<Weak<User>>)->Result<String, ()>
     {
+        let now_time = UTC::now();
+        let now_time = now_time.to_rfc2822();
         let mut json_member_list = JsonValue::new_array();
         for it in member_list
         {
@@ -174,6 +185,7 @@ impl ServerNotifyMessage
             "type"=>"EXIT_SERVER",
             "sender"=>String::from(user_hash_code),
             "members"=>json_member_list,
+            "time"=>now_time,
             "room"=>self.room_name.clone()
         };
         return Ok(res.dump());
