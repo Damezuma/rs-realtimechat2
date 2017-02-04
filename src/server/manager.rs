@@ -353,8 +353,8 @@ fn check_handshake(mut stream: TcpStream)->Result<(User, InputStream), ()>
 struct InputStream
 {
     hashcode:String,
-    stream:TcpStream,
-    buffer: Vec<u8>
+    stream:Mutex<TcpStream>,
+    buffer: Mutex<Vec<u8>>
 }
 impl InputStream
 {
@@ -363,17 +363,19 @@ impl InputStream
         return InputStream
         {
             hashcode: hashcode,
-            stream:stream,
-            buffer:buffer,
+            stream:Mutex::new(stream),
+            buffer:Mutex::new(buffer),
         }
     }
     fn get_user_id(&self)->String
     {
         return self.hashcode.clone();
     }
-    fn read_message(&mut self) -> Result<Message, bool> {
+    fn read_message(&self) -> Result<Message, bool> {
         let mut read_bytes = [0u8; 1024];
-        let res_code = self.stream.read(&mut read_bytes);
+        let mut stream = self.stream.lock().unwrap();
+        let mut buffer = self.buffer.lock().unwrap();
+        let res_code = stream.read(&mut read_bytes);
 
         if let Err(e) = res_code
         {
@@ -401,13 +403,13 @@ impl InputStream
         }
         let mut message_block_end = false;
         let mut string_memory_block: Vec<u8> = Vec::new();
-        if self.buffer.len() != 0
+        if buffer.len() != 0
         {
-            for byte in &self.buffer
+            for byte in buffer.iter()
             {
                 string_memory_block.push(*byte);
             }
-            self.buffer.clear();
+            buffer.clear();
         }
         for i in 0..read_size
         {
@@ -415,7 +417,7 @@ impl InputStream
             {
                 (b'\n', false)=>message_block_end = true,
                 ( _ , false)=>string_memory_block.push(read_bytes[i]),
-                _=>self.buffer.push(read_bytes[i])
+                _=>buffer.push(read_bytes[i])
             }
         }
         if message_block_end == false
@@ -445,10 +447,10 @@ pub struct Manager
     input_socket_listener:Arc<Mutex<TcpListener>>,
     output_socket_listener:Arc<Mutex<TcpListener>>,
     file_socket_listener:Arc<TcpListener>,
-    input_streams:Vec<Arc< Mutex<InputStream>>>,
+    input_streams:Vec<Arc< InputStream>>,
     output_streams:BTreeMap< String, Arc< Mutex<TcpStream>>>,
-    read_channel_recv:Arc< Mutex< Receiver< Weak< Mutex< InputStream>>>>>,
-    read_channel_send:Sender<Weak<Mutex<InputStream>>>
+    read_channel_recv:Arc< Mutex< Receiver< Weak< InputStream>>>>,
+    read_channel_send:Sender<Weak<InputStream>>
 }
 
 impl Manager
@@ -469,7 +471,7 @@ impl Manager
             Ok(v) => v,
             Err(_) =>return Err(ChatServerErr::FailedInitializeServer)
         };
-        let (sx,rx) = channel::<Weak<Mutex<InputStream>>>();
+        let (sx,rx) = channel::<Weak<InputStream>>();
         let mut rooms:BTreeMap<String,Room> = BTreeMap::new();
         rooms.insert(String::from("lounge"),Room::new(String::from("lounge")));
         return Ok(Manager
@@ -557,9 +559,7 @@ impl Manager
                         println!("input stream is None!");
                         return;
                     }
-                    let mut input_stream = input_stream.unwrap();
-                    let input_stream_rc = input_stream.clone();
-                    let mut input_stream = input_stream.lock().unwrap();
+                    let input_stream = input_stream.unwrap();
                     let message =input_stream.read_message();
 
                     if let Err(is_not_timeout) = message
@@ -573,10 +573,10 @@ impl Manager
                             event_sender.send(e).unwrap();
                             return;
                         }
-                        input_stream_send.send(Arc::downgrade(&input_stream_rc)).unwrap();
+                        input_stream_send.send(Arc::downgrade(&input_stream)).unwrap();
                         return;
                     }
-                    input_stream_send.send(Arc::downgrade(&input_stream_rc)).unwrap();
+                    input_stream_send.send(Arc::downgrade(&input_stream)).unwrap();
                     let message = message.unwrap();
                     use server::message::MessageBody;
                     let e =
@@ -677,7 +677,7 @@ impl Manager
     }
     fn on_init_connect_inputstream(&mut self, sender:Sender<EventMessage>, user:User, stream:InputStream)
     {
-        let s = Arc::new(Mutex::new(stream));
+        let s = Arc::new(stream);
         let rc = Arc::new(user);
         self.users.push(rc);
 
@@ -823,7 +823,7 @@ impl Manager
         let mut index:Option<usize> = None;
         for i in 0..len
         {
-            let input_stream = self.input_streams[i].lock().unwrap();
+            let input_stream = &self.input_streams[i];
             if input_stream.get_user_id() == user_hash_id
             {
                 index = Some(i);
@@ -905,7 +905,7 @@ impl Manager
         let mut index:Option<usize> = None;
         for i in 0..len
         {
-            let input_stream = self.input_streams[i].lock().unwrap();
+            let input_stream = &self.input_streams[i];
             if input_stream.get_user_id() == user_hash_id
             {
                 
@@ -1009,9 +1009,8 @@ impl Manager
             return;
         }
         let user_wc = user.clone();
-        let mut user_rc = user.upgrade().unwrap();
-        room.add_new_user(Arc::downgrade(&user_rc.clone()));
-        let mut user = Arc::get_mut(&mut user_rc).unwrap();
+        let mut user = user.upgrade().unwrap();
+        room.add_new_user(user_wc.clone());
         user.enter_room(room.get_name());   
 
         event_sender.send(EventMessage::DoNotifySystemMessage
@@ -1073,8 +1072,7 @@ impl Manager
         let index:usize = index.unwrap();
         room.remove_user(index);
         let user_wr = Arc::downgrade(&user);
-        let mut user = Arc::get_mut(user).unwrap();
-        user.exit_room(room.get_name());
+        println!("1076");user.exit_room(room.get_name());
 
         event_sender.send(EventMessage::DoNotifySystemMessage
         {
@@ -1219,7 +1217,7 @@ impl Manager
         let len = self.input_streams.len();
         for i in 0..len
         {
-            let it = self.input_streams[i].lock().unwrap();
+            let it = &self.input_streams[i];
             if it.get_user_id() == user_hash_code
             {
                 index = Some(i);

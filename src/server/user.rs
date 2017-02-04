@@ -1,20 +1,23 @@
+use std::sync::{Arc,Weak,Mutex};
 pub struct User{
     nickname:String,
     hashcode:String,
-    entered_room_names:Vec<String>
+    entered_room_names:Arc<Mutex<Vec<String>>>
 }
 impl User{
     pub fn new(nickname:String, hashcode:String)->User{
-        return User{nickname:nickname,hashcode:hashcode,entered_room_names:Vec::new()};
+        return User{nickname:nickname,hashcode:hashcode,entered_room_names:Arc::new(Mutex::new(Vec::new()))};
     }
     pub fn get_entered_room_names(&self)->Vec<String>
     {
-        return self.entered_room_names.clone();
+        let room_names = self.entered_room_names.lock().unwrap();
+        return room_names.clone();
     }
-    pub fn enter_room(&mut self, room_name:String)
+    pub fn enter_room(&self, room_name:String)
     {
+        let mut room_names = self.entered_room_names.lock().unwrap();
         let mut already_entered = false;
-        for it in &self.entered_room_names
+        for it in room_names.iter()
         {
             if room_name == *it
             {
@@ -24,25 +27,16 @@ impl User{
         }
         if already_entered == false
         {
-            self.entered_room_names.push(room_name);
+            room_names.push(room_name);
         }
     }
-    pub fn exit_room(&mut self, room_name:String)
+    pub fn exit_room(&self, room_name:String)
     {
-        let mut index:Option<usize> = None;
-        let len = self.entered_room_names.len();
-        for i in 0..len
+        let mut room_names = self.entered_room_names.lock().unwrap();
+        room_names.retain(move|x|
         {
-            if room_name == self.entered_room_names[i]
-            {
-                index = Some(i);
-                break;
-            }
-        }
-        if let Some(index) = index
-        {
-            self.entered_room_names.swap_remove(index);
-        }
+            x != &room_name
+        });
     }
     pub fn get_nickname(&self)->String{
         return self.nickname.clone();
