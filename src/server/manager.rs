@@ -258,8 +258,8 @@ fn check_handshake(mut stream: TcpStream)->Result<(User, InputStream), ()>
     let mut message_block_end = false;
     let mut string_memory_block: Vec<u8> = Vec::new();
     stream.set_nodelay(true);
-    stream.set_read_timeout(Some(Duration::new(0, 100000000)));
-    stream.set_write_timeout(Some(Duration::new(0, 100000000)));
+    stream.set_read_timeout(Some(Duration::new(0, 10000000)));
+    stream.set_write_timeout(Some(Duration::new(0, 10000000)));
     
     while message_block_end == false
     {
