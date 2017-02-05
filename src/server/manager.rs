@@ -566,7 +566,6 @@ impl Manager
                     {
                         if is_not_timeout
                         {
-                            println!("waste {}!",input_stream.get_user_hash_id());
                             //여기에 온 스트림은 타임아웃이 아닌 다른 오류로 여기까지 온 스트림이다. 필요 없으므로 제거한다.
                             //유저도 제거하도록 메시지를 보낸다.
                             let e = EventMessage::DisconnectInputSocket{user_hash_id:input_stream.get_user_hash_id()};
@@ -756,7 +755,6 @@ impl Manager
     }
     fn on_disconnectoutputstream(&mut self, event_sender:Sender<EventMessage>, user_hash_id:String)
     {
-        println!("it is disconnected {}", user_hash_id);
         //연결이 끊긴 유저 정보를 지운다.
         let len = self.users.len();
         let mut user:Option<Arc<User>> = None;
@@ -820,7 +818,6 @@ impl Manager
     }
     fn on_disconnectinputstream(&mut self, event_sender:Sender<EventMessage>, user_hash_id:String)
     {
-        println!("it is disconnected {}", user_hash_id);
         //연결이 끊긴 유저 정보를 지운다.
         let len = self.users.len();
         let mut user:Option<Arc<User>> = None;
@@ -952,9 +949,10 @@ impl Manager
             self.rooms.insert(room_name.clone(), Room::new(room_name.clone()));
         }
         let room =self.rooms.get(&room_name).unwrap();
-        
+
         let user_wc = user.clone();
         let user = user.upgrade().unwrap();
+
         room.add_new_user(user_hash_id, user_wc.clone());
         user.enter_room(room.get_name());   
 
@@ -978,6 +976,7 @@ impl Manager
         let room = self.rooms.get(&room_name);
         if let None = room
         {
+            println!("{}방이 없다.", room_name);
             //실제 방이 없으면 무효한 메시지다.
             return;
         }
@@ -987,6 +986,7 @@ impl Manager
         let user = room.get_user(&user_hash_id);
         if let None = user
         {
+            println!("{}인 유저가 없다.",user_hash_id);
             //방안에 유저가 없었으면 무효한 메시지다.
             return;
         }
@@ -1013,6 +1013,7 @@ impl Manager
     }
     fn on_do_notify_system_message(&mut self, sender:Sender<EventMessage>, pool:ThreadPool, message:ServerNotifyMessage)
     {
+        
         //해당 메시지가 보내진 방 안에 있는 유저이 수신하는 소켓를 구한다.
         let mut output_streams:Vec<(String,Arc<Mutex< TcpStream>>)> = Vec::new();
         let room_name = message.get_room_name();
@@ -1048,8 +1049,9 @@ impl Manager
             {
                 return;
             }
-
-            let msg = Arc::new(msg.unwrap().into_bytes());
+            let msg = msg.unwrap();
+            let msg = Arc::new(msg.into_bytes());
+            
             for (user_hash_id, stream) in output_streams
             {
                 let msg = msg.clone();
@@ -1137,6 +1139,7 @@ impl Manager
             let room = self.rooms.get(it);
             if let None = room
             {
+                println!("{}방이 없습니다.",it);
                 continue;
             }
             let room = room.unwrap();
