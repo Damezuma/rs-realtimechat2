@@ -10,7 +10,7 @@ use server::message::Message;
 use std::thread;
 use std::time::Duration;
 use std::io::{ErrorKind, Read, Write};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap,LinkedList};
 use std::sync::{Arc,Mutex,Weak};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::net::{TcpListener, TcpStream};
@@ -352,17 +352,23 @@ struct InputStream
 {
     hash_id:String,
     stream:Mutex<TcpStream>,
-    buffer: Mutex<Vec<u8>>
+    queue: Mutex<LinkedList<u8>>
 }
 impl InputStream
 {
     fn new(stream: TcpStream, hash_id:String,buffer:Vec<u8>) -> InputStream
     {
+        println!("{}",buffer.len());
+        let mut queue:LinkedList<u8> = LinkedList::new();
+        for ch in buffer
+        {
+            queue.push_back(ch);
+        }
         return InputStream
         {
             hash_id: hash_id,
             stream:Mutex::new(stream),
-            buffer:Mutex::new(buffer),
+            queue:Mutex::new(queue),
         }
     }
     fn get_user_hash_id(&self)->String
@@ -372,7 +378,7 @@ impl InputStream
     fn read_message(&self) -> Result<Message, bool> {
         let mut read_bytes = [0u8; 1024];
         let mut stream = self.stream.lock().unwrap();
-        let mut buffer = self.buffer.lock().unwrap();
+        let mut queue = self.queue.lock().unwrap();
         let res_code = stream.read(&mut read_bytes);
 
         if let Err(e) = res_code
@@ -399,43 +405,39 @@ impl InputStream
         {
             return Err(true);
         }
-        let mut message_block_end = false;
         let mut string_memory_block: Vec<u8> = Vec::new();
-        if buffer.len() != 0
-        {
-            for byte in buffer.iter()
-            {
-                string_memory_block.push(*byte);
-            }
-            buffer.clear();
-        }
         for i in 0..read_size
         {
-            match (read_bytes[i], message_block_end)
+            queue.push_back(read_bytes[i]);
+        }
+        while let Some(byte) = queue.pop_front()
+        {
+            if byte == b'\n'
             {
-                (b'\n', false)=>message_block_end = true,
-                ( _ , false)=>string_memory_block.push(read_bytes[i]),
-                _=>buffer.push(read_bytes[i])
+                //문자열로 변환하고...
+                let message: String = match String::from_utf8(string_memory_block) 
+                {
+                    Ok(value) => value,
+                    Err(_) => 
+                    {
+                        return Err(true);
+                    } 
+                };
+                //메시지를 해석한다...
+                println!("{}",message);
+                return match Message::from_str(self.hash_id.clone(), &message)
+                {
+                    Ok(message) => Ok(message),
+                    Err(_) => Err(true),
+                };
             }
+            string_memory_block.push(byte);
         }
-        if message_block_end == false
+        for ch in string_memory_block
         {
-            return Err(false);
+            queue.push_back(ch);
         }
-        let message: String = match String::from_utf8(string_memory_block) 
-        {
-            Ok(value) => value,
-            Err(_) => 
-            {
-                return Err(true);
-            } 
-        };
-        println!("{}",message);
-        return match Message::from_str(self.hash_id.clone(), &message)
-        {
-            Ok(message) => Ok(message),
-            Err(_) => Err(true),
-        };
+        return Err(false);
     }
 }
 pub struct Manager
