@@ -9,8 +9,7 @@ use server::room::Room;
 use server::message::Message;
 use std::thread;
 use std::time::Duration;
-use std::io::{Error, ErrorKind, Read, Write};
-use std::io;
+use std::io::{ErrorKind, Read, Write};
 use std::collections::BTreeMap;
 use std::sync::{Arc,Mutex,Weak};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -192,7 +191,6 @@ impl ServerNotifyMessage
     }
     fn to_json_text(&self)->Result<String,()>
     {
-        use self::ServerNotifyMessage;
         return match self.body
         {
             ServerNotifyMessageBody::EnterMemberInRoom{ref new_member,ref member_list}=>
@@ -489,7 +487,7 @@ impl Manager
     }
     fn init_accept_input_stream(&self,sender:Sender<EventMessage>,pool:ThreadPool)
     {
-        let mut input_listener_rc = self.input_socket_listener.clone();
+        let input_listener_rc = self.input_socket_listener.clone();
         thread::spawn(move||
         {
             let input_listener = input_listener_rc.lock().unwrap();
@@ -603,7 +601,7 @@ impl Manager
     {
       
         stream.set_read_timeout(Some(Duration::new(60, 0)));
-        let mut bytes = [0u8,1024];
+        let mut bytes =[0u8;1024];
         let mut buffer = Vec::<u8>::new();
         'read_loop:loop
         {
@@ -646,7 +644,7 @@ impl Manager
     fn init_accept_output_stream(&mut self,event_sender:Sender<EventMessage>,pool:ThreadPool)
     {
         
-        let mut listener = self.output_socket_listener.clone();
+        let listener = self.output_socket_listener.clone();
         thread::spawn(move||
         {
             
@@ -658,7 +656,7 @@ impl Manager
                     println!("{}",e);
                     continue;
                 }
-                let mut stream = stream.unwrap();
+                let stream = stream.unwrap();
                 let event_sender = event_sender.clone();
                 pool.execute(move||
                 {
@@ -695,18 +693,9 @@ impl Manager
         }
         let room = self.rooms.get(&room_name).unwrap();
         let users = room.get_users();
-        let user_count = users.len();
 
-        for (user_hash_id, user) in users.iter()
+        for (user_hash_id, _ ) in users.iter()
         {
-            let user_rc = Weak::upgrade(user);
-            if let None = user_rc
-            {
-                //room.remove_user(i);
-                //TODO:검색하다 메모리가 해제된 객체들은 어떻게 할 껀지 생각해 봐야 겠다.
-                continue;
-            }
-            let user = user_rc.unwrap();
             let stream = self.output_streams.get(user_hash_id);
             if let None = stream
             {
@@ -883,7 +872,7 @@ impl Manager
     fn on_init_connect_outputstream(&mut self, event_sender:Sender<EventMessage>, user_hash_id:String,mut stream: TcpStream)
     {
         
-        for it in &mut self.users
+        for it in &self.users
         {
             if it.get_hash_id() == user_hash_id
             {
@@ -892,17 +881,9 @@ impl Manager
                 let wrapper = Arc::new(Mutex::new(stream));
                 self.output_streams.insert(user_hash_id.clone(),wrapper);
                 
-                
-                if let Some(user) = Arc::get_mut(it)
-                {
-                    user.enter_room(String::from("lounge"));
-                } 
-                else
-                {
-
-                }
-                let mut lounge = self.rooms.get_mut("lounge").unwrap();
-                lounge.add_new_user(user_hash_id, Arc::downgrade(it));
+                it.enter_room(String::from("lounge"));
+                let lounge = self.rooms.get("lounge").unwrap();
+                lounge.add_new_user(user_hash_id, Arc::downgrade(&it));
                 //TODO: 새로운 멤버가 왔다는 시스템 메시지를 보내게 만든다.
                 event_sender.send(EventMessage::DoNotifySystemMessage
                 {
@@ -911,7 +892,7 @@ impl Manager
                         room_name:lounge.get_name(),
                         body:ServerNotifyMessageBody::EnterMemberInRoom
                         {
-                            new_member:Arc::downgrade(it),
+                            new_member:Arc::downgrade(&it),
                             member_list:lounge.get_users()
                         }
                     }
@@ -1022,16 +1003,10 @@ impl Manager
         {
             return;
         }
-        let mut room = self.rooms.get_mut(&room_name).unwrap();
+        let room = self.rooms.get(&room_name).unwrap();
         let users = room.get_users();
-        for (user_hash_id, user) in users.iter()
+        for (user_hash_id, _ ) in users.iter()
         {
-            let user = user.upgrade();
-            if let None = user
-            {
-                continue;
-            }
-            let user = user.unwrap();
             let stream = self.output_streams.get(user_hash_id);
             if let None = stream
             {

@@ -1,4 +1,4 @@
-use std::sync::{Arc,Weak,Mutex};
+use std::sync::{Mutex};
 pub struct User{
     nickname:String,
     hash_id:String,
