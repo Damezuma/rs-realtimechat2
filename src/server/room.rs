@@ -1,9 +1,10 @@
-use std::sync::Weak;
+use std::sync::{Weak,Mutex};
 use server::user::User;
+use std::collections::BTreeMap;
 pub struct Room
 {
     name:String,
-    users:Vec<Weak<User>>
+    users:Mutex<BTreeMap<String, Weak<User>>>
 }
 impl Room
 {
@@ -12,38 +13,35 @@ impl Room
         return Room
         {
             name:name,
-            users:Vec::new()
+            users:Mutex::new(BTreeMap::new())
         };
     }
     pub fn get_name(&self)->String
     {
         return self.name.clone();
     }
-    pub fn add_new_user(&mut self, user:Weak<User>)
+    pub fn add_new_user(&self,user_hash_id:String, user:Weak<User>)
     {
-        self.users.push(user);
+        let mut users = self.users.lock().unwrap();
+        users.insert(user_hash_id,user);
     }
-    pub fn get_users(&self)->Vec<Weak<User>>
+    pub fn get_users(&self)->BTreeMap<String, Weak<User>>
     {
-        return self.users.clone();
+        let users = self.users.lock().unwrap();
+        return users.clone();
     }
-    pub fn remove_user(&mut self, index:usize)
+    pub fn get_user(&self, user_hash_id:&String)->Option<Weak<User>>
     {
-       self.users.swap_remove(index);
-    }
-    pub fn check_exit_users(&mut self)
-    {
-        self.users.retain(|ref x|
+        let users = self.users.lock().unwrap();
+        return match users.get(user_hash_id)
         {
-            match x.upgrade()
-            {
-                Some(..)=>true,
-                None=>false
-            }
-        });
+            Some(user)=>Some(user.clone()),
+            None=>None
+        };
     }
-    pub fn set_users(&mut self, users:Vec<Weak<User>>)
+    pub fn remove_user(&self, user_hash_id:&String)
     {
-        self.users = users
+        let mut users = self.users.lock().unwrap();
+        users.remove(user_hash_id);
     }
 }

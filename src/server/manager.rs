@@ -23,22 +23,22 @@ enum ServerNotifyMessageBody
     EnterMemberInRoom
     {
         new_member:Weak<User>,
-        member_list:Vec<Weak<User>>
+        member_list:BTreeMap<String, Weak<User>>
     },
     DisconnectUser
     {
         user_hash_id:String,
-        member_list:Vec<Weak<User>>
+        member_list:BTreeMap<String, Weak<User>>
     },
     ExitServer
     {
         user_hash_id:String,
-        member_list:Vec<Weak<User>>
+        member_list:BTreeMap<String, Weak<User>>
     },
     ExitMemberFromRoom
     {
         exit_member:Weak<User>,
-        member_list:Vec<Weak<User>>
+        member_list:BTreeMap<String, Weak<User>>
     },
     ChangeNickName
     {
@@ -58,23 +58,23 @@ impl ServerNotifyMessage
     {
         self.room_name.clone()
     }
-    fn on_enter_member_in_room(&self,  new_member:&Weak<User>, member_list:&Vec<Weak<User>>)->Result<String, ()>
+    fn on_enter_member_in_room(&self,  new_member:&Weak<User>, member_list:&BTreeMap<String,Weak<User>>)->Result<String, ()>
     {
         let now_time = UTC::now();
         let now_time = now_time.to_rfc2822();
         let mut json_member_list = JsonValue::new_array();
-        for it in member_list
+        for (user_hash_id, user) in member_list.iter()
         {
-            let it = it.upgrade();
-            if let None = it
+            let user = user.upgrade();
+            if let None = user
             {
                 continue;
             }
-            let it = it.unwrap();
+            let user = user.unwrap();
             let member = object!
             {
-                "hash_id"=>it.get_hash_id(),
-                "name"=>it.get_nickname()
+                "hash_id"=>user_hash_id.clone(),
+                "name"=>user.get_nickname()
             };
             json_member_list.push(member);
         }
@@ -94,23 +94,23 @@ impl ServerNotifyMessage
         };
         return Ok(res.dump());
     }
-    fn on_exit_member_from_room(&self, exit_member:&Weak<User>, member_list:&Vec<Weak<User>>)->Result<String, ()>
+    fn on_exit_member_from_room(&self, exit_member:&Weak<User>, member_list:&BTreeMap<String,Weak<User>>)->Result<String, ()>
     {
         let now_time = UTC::now();
         let now_time = now_time.to_rfc2822();
         let mut json_member_list = JsonValue::new_array();
-        for it in member_list
+        for (user_hash_id, user) in member_list.iter()
         {
-            let it = it.upgrade();
-            if let None = it
+            let user = user.upgrade();
+            if let None = user
             {
                 continue;
             }
-            let it = it.unwrap();
+            let user = user.unwrap();
             let member = object!
             {
-                "hash_id"=>it.get_hash_id(),
-                "name"=>it.get_nickname()
+                "hash_id"=>user_hash_id.clone(),
+                "name"=>user.get_nickname()
             };
             json_member_list.push(member);
         }
@@ -130,23 +130,23 @@ impl ServerNotifyMessage
         };
         return Ok(res.dump());
     }
-    fn on_disconnect_user(&self, user_hash_id:&str, member_list:&Vec<Weak<User>>)->Result<String, ()>
+    fn on_disconnect_user(&self, user_hash_id:&str, member_list:&BTreeMap<String,Weak<User>>)->Result<String, ()>
     {
         let now_time = UTC::now();
         let now_time = now_time.to_rfc2822();
         let mut json_member_list = JsonValue::new_array();
-        for it in member_list
+        for (user_hash_id, user) in member_list.iter()
         {
-            let it = it.upgrade();
-            if let None = it
+            let user = user.upgrade();
+            if let None = user
             {
                 continue;
             }
-            let it = it.unwrap();
+            let user = user.unwrap();
             let member = object!
             {
-                "hash_id"=>it.get_hash_id(),
-                "name"=>it.get_nickname()
+                "hash_id"=>user_hash_id.clone(),
+                "name"=>user.get_nickname()
             };
             json_member_list.push(member);
         }
@@ -160,23 +160,23 @@ impl ServerNotifyMessage
         };
         return Ok(res.dump());
     }
-    fn on_exit_server(&self, user_hash_id:&str, member_list:&Vec<Weak<User>>)->Result<String, ()>
+    fn on_exit_server(&self, user_hash_id:&str, member_list:&BTreeMap<String,Weak<User>>)->Result<String, ()>
     {
         let now_time = UTC::now();
         let now_time = now_time.to_rfc2822();
         let mut json_member_list = JsonValue::new_array();
-        for it in member_list
+        for (user_hash_id, user) in member_list.iter()
         {
-            let it = it.upgrade();
-            if let None = it
+            let user = user.upgrade();
+            if let None = user
             {
                 continue;
             }
-            let it = it.unwrap();
+            let user = user.unwrap();
             let member = object!
             {
-                "hash_id"=>it.get_hash_id(),
-                "name"=>it.get_nickname()
+                "hash_id"=>user_hash_id.clone(),
+                "name"=>user.get_nickname()
             };
             json_member_list.push(member);
         }
@@ -698,9 +698,9 @@ impl Manager
         let users = room.get_users();
         let user_count = users.len();
 
-        for i in 0..user_count
+        for (user_hash_id, user) in users.iter()
         {
-            let user_rc = Weak::upgrade(&users[i]);
+            let user_rc = Weak::upgrade(user);
             if let None = user_rc
             {
                 //room.remove_user(i);
@@ -708,13 +708,13 @@ impl Manager
                 continue;
             }
             let user = user_rc.unwrap();
-            let stream = self.output_streams.get(&user.get_hash_id());
+            let stream = self.output_streams.get(user_hash_id);
             if let None = stream
             {
                 continue;
             }
             output_streams.push(
-                (user.get_hash_id(), stream.unwrap().clone())
+                (user_hash_id.clone(), stream.unwrap().clone())
             );
         }
         //별도의 흐름에서 스레드 큐에 집어 넣는다.
@@ -780,30 +780,13 @@ impl Manager
         let room_names_in_user = user.get_entered_room_names();
         for room_name in &room_names_in_user
         {
-            let room = self.rooms.get_mut(room_name);
+            let room = self.rooms.get(room_name);
             if let None = room
             {
                 continue;
             }
-            let mut room = room.unwrap();
-            let users = room.get_users();
-            let mut new_users:Vec<Weak<User>> = Vec::new();
-            for user in users
-            {
-                let user_wr = user.clone();
-                let user = user.upgrade();
-                if let None =user
-                {
-                    continue;
-                }
-                
-                let user = user.unwrap();
-                if user.get_hash_id() != user_hash_id
-                {
-                    new_users.push(user_wr);
-                }
-            }
-            room.set_users(new_users.clone());
+            let room = room.unwrap();
+            room.remove_user(&user_hash_id);
             //그리고 해당 유저가 있던 방의 유저들에게 새로운 유저목록을 준다.
             event_sender.send(EventMessage::DoNotifySystemMessage
             {
@@ -813,7 +796,7 @@ impl Manager
                     body:ServerNotifyMessageBody::DisconnectUser
                     {
                         user_hash_id:user_hash_id.clone(),
-                        member_list:new_users
+                        member_list:room.get_users()
                     }
                 }
             });
@@ -834,7 +817,6 @@ impl Manager
         {
             self.input_streams.swap_remove(i);
         }
-        
     }
     fn on_disconnectinputstream(&mut self, event_sender:Sender<EventMessage>, user_hash_id:String)
     {
@@ -861,31 +843,14 @@ impl Manager
         let room_names_in_user = user.get_entered_room_names();
         for room_name in &room_names_in_user
         {
-            let room = self.rooms.get_mut(room_name);
+            let room = self.rooms.get(room_name);
             if let None = room
             {
                 continue;
             }
-            let mut room = room.unwrap();
-            let users = room.get_users();
-            let mut new_users:Vec<Weak<User>> = Vec::new();
-            for user in users
-            {
-                let user_wr = user.clone();
-                let user = user.upgrade();
-                if let None =user
-                {
-                    continue;
-                }
-                
-                let user = user.unwrap();
-                if user.get_hash_id() != user_hash_id
-                {
-                    new_users.push(user_wr);
-                }
-            }
-            room.set_users(new_users.clone());
-            //그리고 해당 방에 있는 유저들에게 접속이 끊긴 유저가 방을 나갔다고 알린다.
+            let room = room.unwrap();
+            room.remove_user(&user_hash_id);
+            //그리고 해당 유저가 있던 방의 유저들에게 새로운 유저목록을 준다.
             event_sender.send(EventMessage::DoNotifySystemMessage
             {
                 message:ServerNotifyMessage
@@ -894,7 +859,7 @@ impl Manager
                     body:ServerNotifyMessageBody::DisconnectUser
                     {
                         user_hash_id:user_hash_id.clone(),
-                        member_list:new_users
+                        member_list:room.get_users()
                     }
                 }
             });
@@ -928,7 +893,7 @@ impl Manager
                 stream.write_all(&user_hash_id.clone().into_bytes()).unwrap();
                 stream.write_all(b"\n").unwrap();
                 let wrapper = Arc::new(Mutex::new(stream));
-                self.output_streams.insert(user_hash_id,wrapper);
+                self.output_streams.insert(user_hash_id.clone(),wrapper);
                 
                 
                 if let Some(user) = Arc::get_mut(it)
@@ -940,7 +905,7 @@ impl Manager
 
                 }
                 let mut lounge = self.rooms.get_mut("lounge").unwrap();
-                lounge.add_new_user(Arc::downgrade(it));
+                lounge.add_new_user(user_hash_id, Arc::downgrade(it));
                 //TODO: 새로운 멤버가 왔다는 시스템 메시지를 보내게 만든다.
                 event_sender.send(EventMessage::DoNotifySystemMessage
                 {
@@ -986,31 +951,11 @@ impl Manager
         {
             self.rooms.insert(room_name.clone(), Room::new(room_name.clone()));
         }
-        let mut room =self.rooms.get_mut(&room_name).unwrap();
-        let users_in_room:Vec<Weak<User>> = room.get_users();
-        let len = users_in_room.len();
-        let mut is_already_in = false;
-        for i in 0..len
-        {
-            let it = users_in_room[i].upgrade();
-            if let None = it
-            {
-                continue;
-            }
-            let it = it.unwrap();
-            if it.get_hash_id() == user_hash_id
-            {
-                is_already_in = true;
-                break;
-            }
-        }
-        if is_already_in != false
-        {
-            return;
-        }
+        let room =self.rooms.get(&room_name).unwrap();
+        
         let user_wc = user.clone();
         let user = user.upgrade().unwrap();
-        room.add_new_user(user_wc.clone());
+        room.add_new_user(user_hash_id, user_wc.clone());
         user.enter_room(room.get_name());   
 
         event_sender.send(EventMessage::DoNotifySystemMessage
@@ -1028,52 +973,31 @@ impl Manager
     }
     fn on_exit_room(&mut self,event_sender:Sender<EventMessage>,message:Message)
     {
-        let mut user_index_in_users:Option<usize> = None;
-
-        let user_hash_id = message.get_user_hash_id();
-        let len = self.users.len();
-        for i in 0..len
-        {
-            if self.users[i].get_hash_id() == user_hash_id
-            {
-                user_index_in_users = Some(i);
-                break;
-            }
-        }
-        if let None = user_index_in_users
-        {
-            return;
-        }
-        let ref mut user = self.users[user_index_in_users.unwrap()];
+        //방에서 유저를 찾는다.
         let room_name = message.get_room_name();
-        if self.rooms.contains_key(&room_name) == false
+        let room = self.rooms.get(&room_name);
+        if let None = room
         {
+            //실제 방이 없으면 무효한 메시지다.
             return;
         }
-        let mut room =self.rooms.get_mut(&room_name).unwrap();
-        let users_in_room:Vec<Weak<User>> = room.get_users();
-        let len = users_in_room.len();
-        let mut index:Option<usize> = None;
-        for i in 0..len
+        let room = room.unwrap();
+        
+        let user_hash_id = message.get_user_hash_id();
+        let user = room.get_user(&user_hash_id);
+        if let None = user
         {
-            if let Some(it) = users_in_room[i].upgrade()
-            {
-                if it.get_hash_id() == user_hash_id
-                {
-                    index = Some(i);
-                    break;
-                }
-            }
-        }
-        if let None = index
-        {
+            //방안에 유저가 없었으면 무효한 메시지다.
             return;
         }
-        let index:usize = index.unwrap();
-        room.remove_user(index);
-        let user_wr = Arc::downgrade(&user);
-        println!("1076");user.exit_room(room.get_name());
-
+        let user = user.unwrap();
+        let user_wr = user.clone();
+        room.remove_user(&user_hash_id);
+        let user = user.upgrade();
+        if let Some(user) = user
+        {
+            user.exit_room(&room_name);
+        }
         event_sender.send(EventMessage::DoNotifySystemMessage
         {
             message:ServerNotifyMessage
@@ -1099,23 +1023,21 @@ impl Manager
         }
         let mut room = self.rooms.get_mut(&room_name).unwrap();
         let users = room.get_users();
-        let user_count = users.len();
-
-        for i in 0..user_count
+        for (user_hash_id, user) in users.iter()
         {
-            let user_rc = Weak::upgrade(&users[i]);
-            if let None = user_rc
+            let user = user.upgrade();
+            if let None = user
             {
                 continue;
             }
-            let user = user_rc.unwrap();
-            let stream = self.output_streams.get(&user.get_hash_id());
+            let user = user.unwrap();
+            let stream = self.output_streams.get(user_hash_id);
             if let None = stream
             {
                 continue;
             }
             output_streams.push(
-                (user.get_hash_id(), stream.unwrap().clone())
+                (user_hash_id.clone(), stream.unwrap().clone())
             );
         }
         //별도의 흐름에서 스레드 큐에 집어 넣는다.
@@ -1183,34 +1105,13 @@ impl Manager
         let rooms_user_entered = user.get_entered_room_names();
         for it in &rooms_user_entered
         {
-            let room = self.rooms.get_mut(it);
+            let room = self.rooms.get(it);
             if let None = room
             {
                 continue;
             }
-            let mut room = room.unwrap();
-            let users_in_room = room.get_users();
-            let mut index:Option<usize> = None;
-            let len = users_in_room.len();
-            for i in 0..len
-            {
-                let it = users_in_room[i].upgrade();
-                if let None = it
-                {
-                    continue;
-                }
-                let it = it.unwrap();
-                if it.get_hash_id() == user_hash_id
-                {
-                    index = Some(i);
-                    break;
-                }
-            }
-            if let None = index
-            {
-                continue;
-            }
-            room.remove_user(index.unwrap());
+            let room = room.unwrap();
+            room.remove_user(&user_hash_id);
         }
         //스트림을 닫는다.
         let mut index:Option<usize> = None;

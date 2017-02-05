@@ -30,12 +30,12 @@ impl User{
             room_names.push(room_name);
         }
     }
-    pub fn exit_room(&self, room_name:String)
+    pub fn exit_room(&self, room_name:&String)
     {
         let mut room_names = self.entered_room_names.lock().unwrap();
         room_names.retain(move|x|
         {
-            x != &room_name
+            x != room_name
         });
     }
     pub fn get_nickname(&self)->String{
