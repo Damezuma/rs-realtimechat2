@@ -424,7 +424,6 @@ impl InputStream
                     } 
                 };
                 //메시지를 해석한다...
-                println!("{}",message);
                 return match Message::from_str(self.hash_id.clone(), &message)
                 {
                     Ok(message) => Ok(message),
