@@ -1,8 +1,14 @@
 use std::sync::{Mutex};
+struct RecvStream
+{
+    
+}
 pub struct User{
     nickname:String,
     hash_id:String,
     entered_room_names:Mutex<Vec<String>>
+    send_stream:Mutex<TcpStream>;
+    recv_stream:Mutex<TcpStream>;
 }
 impl User{
     pub fn new(nickname:String, hash_id:String)->User{
@@ -12,6 +18,14 @@ impl User{
     {
         let room_names = self.entered_room_names.lock().unwrap();
         return room_names.clone();
+    }
+    pub fn recv_message(&self)->Result<Message, bool>
+    {
+
+    }
+    pub fn send_message(&self)->bool
+    {
+
     }
     pub fn enter_room(&self, room_name:String)
     {

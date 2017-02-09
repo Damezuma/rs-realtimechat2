@@ -10,8 +10,7 @@ pub enum MessageBody{
     EnterRoom,
     ExitRoom,
     ExitServer,
-    ChangeName{new_name:String},
-
+    ChangeName{new_name:String}
 }
 pub struct Message{
     pub body:MessageBody,

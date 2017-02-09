@@ -380,7 +380,6 @@ impl InputStream
         let mut stream = self.stream.lock().unwrap();
         let mut queue = self.queue.lock().unwrap();
         let res_code = stream.read(&mut read_bytes);
-
         if let Err(e) = res_code
         {
             
